@@ -28,7 +28,7 @@ class VirtualizationController extends AbstractController
 
 
         if (!extension_loaded('libvirt')) {
-            throw new \Exception($this->translator->trans('libvirt_not_installed'));
+            throw new \Exception($this->translator->trans('error.libvirt_not_installed'));
         }
         
     }
@@ -42,7 +42,7 @@ class VirtualizationController extends AbstractController
             // Mit lokalem Hypervisor verbinden
             $this->connection = libvirt_connect('qemu:///system', false);
             if (!$this->connection) {
-                throw new \Exception($this->translator->trans('libvirt_connection_failed') . libvirt_get_last_error());
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed') . libvirt_get_last_error());
             }
         }
     }
@@ -95,7 +95,7 @@ class VirtualizationController extends AbstractController
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
 
             if (!$domain) {
-                return $this->json(['error' => $this->translator->trans('libvirt_domain_not_found')], 404);
+                return $this->json(['error' => $this->translator->trans('error.libvirt_domain_not_found')], 404);
             }
 
             $result = libvirt_domain_create($domain);
@@ -121,7 +121,7 @@ class VirtualizationController extends AbstractController
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
 
             if (!$domain) {
-                return $this->json(['error' => $this->translator->trans('libvirt_domain_not_found')], 404);
+                return $this->json(['error' => $this->translator->trans('error.libvirt_domain_not_found')], 404);
             }
 
             $data = json_decode($request->getContent(), true);

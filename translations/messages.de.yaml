@@ -1,6 +1,14 @@
 # translations/messages.de.yaml
-libvirt_not_installed: 'Libvirt ist nicht installiert'
-libvirt_connection_failed: 'Verbindung zu libvirt fehlgeschlagen'
-libvirt_domain_not_found: 'Domain nicht gefunden'
+
+# general
+error.no_command_specified: Kein Befehl angegeben
+error.command_not_allowed: 'Unerlaubter Befehl'
+
+
+
+# libvirt
+error.libvirt_not_installed: 'Libvirt ist nicht installiert'
+error.libvirt_connection_failed: 'Verbindung zu libvirt fehlgeschlagen'
+error.libvirt_domain_not_found: 'Domain nicht gefunden'
 libvirt_domain_force_stop: 'Erzwungener Stopp'
 libvirt_domain_graceful_stop: 'Regulärer Stopp'

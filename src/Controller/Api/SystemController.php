@@ -3,14 +3,32 @@
 namespace App\Controller\Api;
 
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Contracts\Translation\TranslatorInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Routing\Attribute\Route;
 
 #[Route('/api/system', name: 'api_system_')]
 class SystemController extends AbstractController
 {
+
+    private $translator;
+
+    public function __construct(TranslatorInterface $translator, RequestStack $requestStack)
+
+    {
+        $this->translator = $translator;
+    
+        $request = $requestStack->getCurrentRequest();
+        if ($request) {
+            $locale = $request->getPreferredLanguage(['en', 'de']) ?? 'de';
+            $request->setLocale($locale);
+        }
+    }
+
+
     #[Route('/status', name: 'status', methods: ['GET'])]
     public function getSystemStatus(): JsonResponse
     {
@@ -41,7 +59,7 @@ class SystemController extends AbstractController
         $command = $data['command'] ?? null;
         
         if (!$command) {
-            return $this->json(['error' => 'Kein Befehl angegeben'], 400);
+            return $this->json(['error' =>  $this->translator->trans('error.no_command_specified')], 400);
         }
         
         // WICHTIG: Hier solltest du unbedingt Sicherheitsmaßnahmen einbauen!
@@ -53,7 +71,7 @@ class SystemController extends AbstractController
         $commandParts = explode(' ', $command);
         
         if (!in_array($commandParts[0], $allowedCommands)) {
-            return $this->json(['error' => 'Unerlaubter Befehl'], 403);
+            return $this->json(['error' => $this->translator->trans('error.command_not_allowed')], 403);
         }
         
         $process = Process::fromShellCommandline($command);
