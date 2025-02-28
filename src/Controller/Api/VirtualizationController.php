@@ -9,7 +9,40 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\HttpFoundation\RequestStack;
 
-#[Route('/api/virtualization', name: 'api_virt_')]
+use ApiPlatform\Metadata\ApiResource;
+use ApiPlatform\Metadata\Get;
+use ApiPlatform\Metadata\GetCollection;
+use ApiPlatform\Metadata\Post;
+
+
+
+
+#[ApiResource(
+    operations: [
+        new GetCollection(
+            name: 'get_domains',
+            uriTemplate: '/virt/domains',
+            controller: self::class.'::listDomains',
+            read: false
+        ),
+        new Post(
+            name: 'start_domain',
+            uriTemplate: '/virt/domain/{name}/start',
+            controller: self::class.'::startDomain',
+            read: false
+        ),
+        new Post(
+            name: 'stop_domain',
+            uriTemplate: '/virt/domain/{name}/stop',
+            controller: self::class.'::stopDomain',
+            read: false
+        )
+    ]
+)]
+
+
+
+
 class VirtualizationController extends AbstractController
 {
     private $connection;
@@ -33,7 +66,6 @@ class VirtualizationController extends AbstractController
         
     }
 
-
     
     private function connect(): void
     {
@@ -49,7 +81,6 @@ class VirtualizationController extends AbstractController
 
 
 
-    #[Route('/domains', name: 'domains_list', methods: ['GET'])]
     public function listDomains(): JsonResponse
     {
         try {
@@ -75,7 +106,6 @@ class VirtualizationController extends AbstractController
                 }
             }
 
-            // Der Rest des Codes bleibt unverändert
 
             return $this->json(['domains' => $domains]);
         } catch (\Exception $e) {
@@ -86,8 +116,6 @@ class VirtualizationController extends AbstractController
     }
 
     
-    
-    #[Route('/domain/{name}/start', name: 'domain_start', methods: ['POST'])]
     public function startDomain(string $name): JsonResponse
     {
         try {
@@ -112,8 +140,6 @@ class VirtualizationController extends AbstractController
     }
 
     
-    
-    #[Route('/domain/{name}/stop', name: 'domain_stop', methods: ['POST'])]
     public function stopDomain(string $name, Request $request): JsonResponse
     {
         try {

@@ -3,14 +3,34 @@
 namespace App\Controller\Api;
 
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Contracts\Translation\TranslatorInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
+use ApiPlatform\Metadata\ApiResource;
+use ApiPlatform\Metadata\Get;
+use ApiPlatform\Metadata\Post;
+use Symfony\Contracts\Translation\TranslatorInterface;
 use Symfony\Component\Process\Process;
-use Symfony\Component\Routing\Attribute\Route;
 
-#[Route('/api/system', name: 'api_system_')]
+
+#[ApiResource(
+    operations: [
+        new Get(
+            name: 'api_system_status',
+            uriTemplate: '/system/status',
+            controller: SystemController::class.'::getSystemStatus',
+            read: false
+        ),
+        new Post(
+            name: 'api_system_execute',
+            uriTemplate: '/system/execute',
+            controller: SystemController::class.'::executeCommand',
+            read: false
+        )
+    ]
+)]
+
+
 class SystemController extends AbstractController
 {
 
@@ -29,7 +49,6 @@ class SystemController extends AbstractController
     }
 
 
-    #[Route('/status', name: 'status', methods: ['GET'])]
     public function getSystemStatus(): JsonResponse
     {
         // CPU-Auslastung
@@ -52,7 +71,8 @@ class SystemController extends AbstractController
         ]);
     }
     
-    #[Route('/execute', name: 'execute', methods: ['POST'])]
+
+
     public function executeCommand(Request $request): JsonResponse
     {
         $data = json_decode($request->getContent(), true);

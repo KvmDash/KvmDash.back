@@ -5,3 +5,5 @@ api_platform:
         stateless: true
         cache_headers:
             vary: ['Content-Type', 'Authorization', 'Origin']
+    mapping:
+      paths: ['%kernel.project_dir%/src/Entity', '%kernel.project_dir%/src/Controller/Api']
