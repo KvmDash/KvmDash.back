@@ -14,7 +14,8 @@ use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\GetCollection;
 use ApiPlatform\Metadata\Post;
 
-
+use App\Dto\VirtualMachine;
+use App\Dto\VirtualMachineAction;
 
 
 #[ApiResource(
@@ -23,19 +24,22 @@ use ApiPlatform\Metadata\Post;
             name: 'get_domains',
             uriTemplate: '/virt/domains',
             controller: self::class.'::listDomains',
-            read: false
+            read: false,
+            output: VirtualMachine::class,
         ),
         new Post(
             name: 'start_domain',
             uriTemplate: '/virt/domain/{name}/start',
             controller: self::class.'::startDomain',
-            read: false
+            read: false,
+            output: VirtualMachineAction::class,
         ),
         new Post(
             name: 'stop_domain',
             uriTemplate: '/virt/domain/{name}/stop',
             controller: self::class.'::stopDomain',
-            read: false
+            read: false,
+            output: VirtualMachineAction::class,
         )
     ]
 )]
@@ -95,14 +99,14 @@ class VirtualizationController extends AbstractController
 
                 if ($domain) {
                     $info = libvirt_domain_get_info($domain);
-                    $domains[] = [
-                        'id' => $domainId,
-                        'name' => $domainId, // Da Name = ID
-                        'state' => $info['state'] ?? 'unknown',
-                        'memory' => $info['memory'] ?? 0,
-                        'max_memory' => $info['maxMem'] ?? 0,
-                        'cpu_count' => $info['nrVirtCpu'] ?? 0
-                    ];
+                    $domains[] = new VirtualMachine(
+                        id: $domainId,
+                        name: $domainId,
+                        state: $info['state'] ?? 0,
+                        memory: $info['memory'] ?? 0,
+                        maxMemory: $info['maxMem'] ?? 0,
+                        cpuCount: $info['nrVirtCpu'] ?? 0
+                    );
                 }
             }
 
@@ -128,12 +132,12 @@ class VirtualizationController extends AbstractController
 
             $result = libvirt_domain_create($domain);
 
-            return $this->json([
-                'success' => $result !== false,
-                'domain' => $name,
-                'action' => 'start',
-                'error' => $result === false ? libvirt_get_last_error() : null
-            ]);
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'start',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
         }
@@ -160,12 +164,14 @@ class VirtualizationController extends AbstractController
                 $result = libvirt_domain_shutdown($domain);
             }
 
-            return $this->json([
-                'success' => $result !== false,
-                'domain' => $name,
-                'action' => $force ? $this->translator->trans('libvirt_domain_force_stop') :  $this->translator->trans('libvirt_domain_graceful_stop'),
-                'error' => $result === false ? libvirt_get_last_error() : null
-            ]);
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: $force ? $this->translator->trans('libvirt_domain_force_stop') :  $this->translator->trans('libvirt_domain_graceful_stop'),
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+
+
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
         }
