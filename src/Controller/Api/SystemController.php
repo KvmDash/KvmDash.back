@@ -12,19 +12,24 @@ use ApiPlatform\Metadata\Post;
 use Symfony\Contracts\Translation\TranslatorInterface;
 use Symfony\Component\Process\Process;
 
+use App\Dto\SystemStatus;
+use App\Dto\CommandExecution;
+
 
 #[ApiResource(
     operations: [
         new Get(
             name: 'api_system_status',
             uriTemplate: '/system/status',
-            controller: SystemController::class.'::getSystemStatus',
+            controller: self::class.'::getSystemStatus',
+            output: SystemStatus::class,
             read: false
         ),
         new Post(
             name: 'api_system_execute',
             uriTemplate: '/system/execute',
-            controller: SystemController::class.'::executeCommand',
+            controller: self::class.'::executeCommand',
+            output: CommandExecution::class,
             read: false
         )
     ]
@@ -63,12 +68,15 @@ class SystemController extends AbstractController
         $diskProcess = new Process(['df', '-h']);
         $diskProcess->run();
         
-        return $this->json([
-            'cpu_info' => $cpuProcess->isSuccessful() ? $cpuProcess->getOutput() : 'Error',
-            'memory_info' => $memProcess->isSuccessful() ? $memProcess->getOutput() : 'Error',
-            'disk_info' => $diskProcess->isSuccessful() ? $diskProcess->getOutput() : 'Error',
-            'timestamp' => new \DateTime()
-        ]);
+        $status = new SystemStatus(
+            cpuInfo: $cpuProcess->isSuccessful() ? $cpuProcess->getOutput() : 'Error',
+            memoryInfo: $memProcess->isSuccessful() ? $memProcess->getOutput() : 'Error',
+            diskInfo: $diskProcess->isSuccessful() ? $diskProcess->getOutput() : 'Error',
+            timestamp: new \DateTime()
+        );
+
+        return $this->json($status);
+        
     }
     
 
@@ -97,12 +105,12 @@ class SystemController extends AbstractController
         $process = Process::fromShellCommandline($command);
         $process->run();
         
-        return $this->json([
-            'command' => $command,
-            'success' => $process->isSuccessful(),
-            'output' => $process->getOutput(),
-            'error' => $process->getErrorOutput(),
-            'exit_code' => $process->getExitCode()
-        ]);
+        return $this->json(new CommandExecution(
+            command: $command,
+            success: $process->isSuccessful(),
+            output: $process->getOutput(),
+            error: $process->getErrorOutput(),
+            exitCode: $process->getExitCode()
+        ));
     }
 }
