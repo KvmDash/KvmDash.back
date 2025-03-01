@@ -5,7 +5,6 @@ error.no_command_specified: Kein Befehl angegeben
 error.command_not_allowed: 'Unerlaubter Befehl'
 
 
-
 # libvirt
 error.libvirt_not_installed: 'Libvirt ist nicht installiert'
 error.libvirt_connection_failed: 'Verbindung zu libvirt fehlgeschlagen'
