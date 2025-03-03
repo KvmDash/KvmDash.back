@@ -10,7 +10,10 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Process\Process;
 
 use App\Dto\HostInfo;
-use App\Dto\CpuInfo;
+use App\Dto\HostCpuInfo;
+use App\Dto\HostMemInfo;
+
+
 
 #[ApiResource(
     operations: [
@@ -25,7 +28,14 @@ use App\Dto\CpuInfo;
             name: 'api_cpu_info',
             uriTemplate: '/host/cpu',
             controller: self::class.'::getCpuInfo',
-            output: CpuInfo::class,
+            output: HostCpuInfo::class,
+            read: false
+        ),
+        new Get(
+            name: 'api_mem_info',
+            uriTemplate: '/host/mem',
+            controller: self::class.'::getMemInfo',
+            output: HostMemInfo::class,
             read: false
         )
     ]
@@ -66,7 +76,7 @@ class HostController extends AbstractController
     }
 
 
-    // Host information
+    // Cpu
     private function getCpuTimes(): array
     {
         $statContent = @file_get_contents('/proc/stat');
@@ -133,6 +143,46 @@ class HostController extends AbstractController
         } catch (\Exception $e) {
             return new JsonResponse([
                 'error' => 'Failed to fetch CPU information',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    // Memory
+    public function getMemInfo(): JsonResponse
+    {
+        try {
+            // Benutze -b für Bytes statt human-readable Format
+            $process = new Process(['env', 'LANG=C', 'free', '-b']);
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                throw new \RuntimeException($process->getErrorOutput());
+            }
+            
+            $output = $process->getOutput();
+            
+            // Vereinfachtes Pattern für das Standard-Format von free
+            if (preg_match('/^Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $output, $matches)) {
+                // Konvertiere Bytes in GB für bessere Lesbarkeit
+                $toGB = fn($bytes) => round($bytes / (1024 * 1024 * 1024), 2) . 'G';
+                
+                return new JsonResponse([
+                    'total' => $toGB((int)$matches[1]),
+                    'used' => $toGB((int)$matches[2]),
+                    'free' => $toGB((int)$matches[3]),
+                    'shared' => $toGB((int)$matches[4]),
+                    'buff_cache' => $toGB((int)$matches[5]),
+                    'available' => $toGB((int)$matches[6])
+                ]);
+            }
+            
+            throw new \RuntimeException('Unable to parse memory output');
+            
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'error' => 'Failed to fetch memory information',
                 'message' => $e->getMessage()
             ], 500);
         }

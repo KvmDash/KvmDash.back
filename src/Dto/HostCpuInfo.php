@@ -2,7 +2,7 @@
 
 namespace App\Dto;
 
-class CpuInfo
+class HostCpuInfo
 {
     public function __construct(
         public string $cpu,     // CPU Bezeichner (cpu0, cpu1, etc)
