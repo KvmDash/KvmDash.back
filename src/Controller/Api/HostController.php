@@ -12,7 +12,7 @@ use Symfony\Component\Process\Process;
 use App\Dto\HostInfo;
 use App\Dto\HostCpuInfo;
 use App\Dto\HostMemInfo;
-
+use App\Dto\HostDiskInfo;
 
 
 #[ApiResource(
@@ -36,6 +36,13 @@ use App\Dto\HostMemInfo;
             uriTemplate: '/host/mem',
             controller: self::class.'::getMemInfo',
             output: HostMemInfo::class,
+            read: false
+        ),
+        new Get(
+            name: 'api_disk_info',
+            uriTemplate: '/host/disk',
+            controller: self::class.'::getDiskInfo',
+            output: HostDiskInfo::class,
             read: false
         )
     ]
@@ -183,6 +190,62 @@ class HostController extends AbstractController
         } catch (\Exception $e) {
             return new JsonResponse([
                 'error' => 'Failed to fetch memory information',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // Disk
+    public function getDiskInfo(): JsonResponse
+    {
+        try {
+            // Benutze df ohne temporäre Filesysteme
+            $process = new Process(['df', '-h', '-x', 'devtmpfs', '-x', 'tmpfs']);
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                throw new \RuntimeException($process->getErrorOutput());
+            }
+            
+            $output = $process->getOutput();
+            $lines = explode("\n", trim($output));
+            $headers = preg_split('/\s+/', array_shift($lines));
+            
+            if ($headers === false) {
+                throw new \RuntimeException('Failed to parse headers');
+            }
+            
+            $result = [];
+            foreach ($lines as $line) {
+                if (trim($line) === '') {
+                    continue;
+                }
+                
+                // Split die Zeile, aber behalte den letzten Teil (Mount-Punkt) intakt
+                $values = preg_split('/\s+/', $line, count($headers) - 1);
+                if ($values === false) {
+                    continue;
+                }
+                
+                if (count($values) === count($headers) - 1) {
+                    $values[] = substr($line, strrpos($line, ' ') + 1);
+                    
+                    $result[] = [
+                        'Filesystem' => $values[0],
+                        'Size' => $values[1],
+                        'Used' => $values[2],
+                        'Avail' => $values[3],
+                        'Use' => $values[4],
+                        'Mounted' => $values[5]
+                    ];
+                }
+            }
+            
+            return new JsonResponse($result);
+            
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'error' => 'Failed to fetch disk information',
                 'message' => $e->getMessage()
             ], 500);
         }
