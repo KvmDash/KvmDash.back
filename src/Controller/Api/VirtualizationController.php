@@ -519,7 +519,7 @@ class VirtualizationController extends AbstractController
             // VHD-Pfad im Pool
             $vhdPath = $poolPath . '/' . $data['name'] . '.qcow2';
     
-            // Rest des Codes bleibt gleich...
+            // QCOW2 Image erstellen
             $command = sprintf(
                 'qemu-img create -f qcow2 %s %dG',
                 escapeshellarg($vhdPath),
