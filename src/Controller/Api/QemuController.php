@@ -123,4 +123,51 @@ class QemuController extends AbstractController
             ], 500);
         }
     }
+
+
+    /**
+     * Liefert eine Liste verfügbarer Betriebssystem-Templates
+     * 
+     * Nutzt virt-install --osinfo list um alle unterstützten 
+     * Betriebssysteme abzufragen. Dies wird benötigt für:
+     * - Optimale VM-Konfiguration
+     * - Treiber-Auswahl
+     * - Ressourcen-Empfehlungen
+     *
+     * @return JsonResponse Liste aller verfügbaren OS-Templates
+     */
+    public function getOsInfo(): JsonResponse
+    {
+        try {
+            $command = ['virt-install', '--osinfo', 'list'];
+            $output = [];
+            $returnVar = 0;
+
+            exec(implode(' ', $command), $output, $returnVar);
+
+            if ($returnVar !== 0) {
+                throw new \Exception($this->translator->trans('error.osinfo_command_failed'));
+            }
+
+            // Filtern und Formatieren der Ausgabe
+            $oslist = array_filter($output, function ($line) {
+                $line = trim($line);
+                // Ignoriere leere Zeilen und die Hinweiszeile
+                return !empty($line) && !str_starts_with($line, 'You can see');
+            });
+
+            return $this->json([
+                'status' => 'success',
+                'data' => array_values($oslist) // Array neu indizieren
+            ]);
+        } catch (\Exception $e) {
+            return $this->json([
+                'status' => 'error',
+                'message' => $this->translator->trans(
+                    'error.osinfo_list_failed',
+                    ['%error%' => $e->getMessage()]
+                )
+            ], 500);
+        }
+    }
 }
