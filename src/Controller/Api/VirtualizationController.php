@@ -54,6 +54,14 @@ use App\Dto\VirtualMachineAction;
             read: false,
             output: VirtualMachineAction::class,
         ),
+        new Post(
+            name: 'delete_domain',
+            uriTemplate: '/virt/domain/{name}/delete',
+            controller: self::class . '::deleteDomain',
+            read: false,
+            output: VirtualMachineAction::class,
+        ),
+
     ]
 )]
 
@@ -243,6 +251,63 @@ class VirtualizationController extends AbstractController
                 success: $result !== false,
                 domain: $name,
                 action: 'reboot',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+
+    public function deleteDomain(string $name, Request $request): JsonResponse
+    {
+        try {
+            $this->connect();
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+
+            if (!$domain) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            // Prüfe ob VHD-Dateien auch gelöscht werden sollen
+            $data = json_decode($request->getContent(), true);
+            $deleteVhd = isset($data['deleteVhd']) && $data['deleteVhd'] === true;
+
+            // XML für Disk-Pfade und NVRAM-Check
+            $xml = libvirt_domain_get_xml_desc($domain, 0);
+            $diskPaths = [];
+
+            if ($deleteVhd && $xml) {
+                preg_match_all('/<source file=\'([^\']+)\'/', $xml, $matches);
+                $diskPaths = $matches[1] ?? [];
+            }
+
+            // Zuerst Domain stoppen falls noch aktiv
+            $info = libvirt_domain_get_info($domain);
+            if ($info['state'] === 1) {
+                libvirt_domain_destroy($domain);
+            }
+
+            // Domain undefine mit NVRAM flags
+            // 2 = VIR_DOMAIN_UNDEFINE_MANAGED_SAVE (1) | VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA (1)
+            // 8 = VIR_DOMAIN_UNDEFINE_NVRAM
+            $result = libvirt_domain_undefine_flags($domain, 10); // 2 + 8
+
+            // VHD-Dateien löschen wenn gewünscht
+            if ($deleteVhd && $result !== false) {
+                foreach ($diskPaths as $path) {
+                    if (file_exists($path)) {
+                        unlink($path);
+                    }
+                }
+            }
+
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: $deleteVhd ? 'delete_with_storage' : 'delete',
                 error: $result === false ? libvirt_get_last_error() : null
             ));
         } catch (\Exception $e) {
