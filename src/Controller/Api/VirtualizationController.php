@@ -60,6 +60,13 @@ use App\Dto\VirtualMachineAction;
             read: false,
             output: VirtualMachineAction::class,
         ),
+        new Post(
+            name: 'create_domain',
+            uriTemplate: '/virt/domain/create',
+            controller: self::class . '::createDomain',
+            read: false,
+            output: VirtualMachineAction::class,
+        ),
 
     ]
 )]
@@ -454,6 +461,145 @@ class VirtualizationController extends AbstractController
             ));
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+
+    /**
+     * Erstellt eine neue virtuelle Maschine
+     * 
+     * Diese Methode erstellt eine neue VM mit folgenden Schritten:
+     * 1. Erstellen einer QCOW2 Image-Datei als virtuelle Festplatte
+     * 2. Generieren der VM-Definition im libvirt XML-Format
+     * 3. Registrieren der VM beim Hypervisor
+     * 4. Automatischer Start der VM
+     *
+     * Erwartetes Request-Format:
+     * {
+     *   "name": "vm-name",           // Eindeutiger Name der VM
+     *   "memory": 2048,              // RAM in MB
+     *   "vcpus": 2,                  // Anzahl virtueller CPUs
+     *   "disk_size": 20,             // Festplattengröße in GB
+     *   "iso_image": "/path/to.iso", // Pfad zum Boot-Image
+     *   "network_bridge": "br0"      // Netzwerk-Bridge / NAT-Netzwerk
+     * }
+     * 
+     * Die erstellte VM enthält:
+     * - QCOW2 Festplatte mit virtio Treibern
+     * - IDE CD-ROM mit Boot-ISO
+     * - VirtIO Netzwerk-Interface
+     * - QXL Grafiktreiber für bessere Performance
+     * - VNC/Spice Konsole für Remote-Zugriff
+     * 
+     * @param Request $request HTTP-Request mit VM-Konfiguration
+     * @return JsonResponse Status der Erstellungsoperation
+     * @throws \Exception Bei Fehlern während der Erstellung
+     */
+    public function createDomain(Request $request): JsonResponse
+    {
+        try {
+            $this->connect();
+            $data = json_decode($request->getContent(), true);
+    
+            // Default Storage Pool holen
+            $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
+            if (!$pool) {
+                throw new \Exception($this->translator->trans('error.storage_pool_not_found'));
+            }
+    
+            // Pool XML parsen für den Basis-Pfad
+            $poolXml = libvirt_storagepool_get_xml_desc($pool, 0);
+            $poolInfo = simplexml_load_string($poolXml);
+            $poolPath = (string)$poolInfo->target->path;
+    
+            if (!$poolPath || !is_dir($poolPath)) {
+                throw new \Exception($this->translator->trans('error.storage_pool_path_invalid'));
+            }
+    
+            // VHD-Pfad im Pool
+            $vhdPath = $poolPath . '/' . $data['name'] . '.qcow2';
+    
+            // Rest des Codes bleibt gleich...
+            $command = sprintf(
+                'qemu-img create -f qcow2 %s %dG',
+                escapeshellarg($vhdPath),
+                (int)$data['disk_size']
+            );
+            exec($command, $output, $returnVar);
+
+            if ($returnVar !== 0) {
+                throw new \Exception($this->translator->trans('error.create_disk_failed'));
+            }
+
+            // XML-Template für die VM
+            $xml = sprintf(
+                '<?xml version="1.0" encoding="UTF-8"?>
+            <domain type="kvm">
+                <name>%s</name>
+                <memory unit="MiB">%d</memory>
+                <vcpu>%d</vcpu>
+                <os>
+                    <type arch="x86_64">hvm</type>
+                    <boot dev="cdrom"/>
+                    <boot dev="hd"/>
+                </os>
+                <features>
+                    <acpi/>
+                    <apic/>
+                </features>
+                <devices>
+                    <disk type="file" device="disk">
+                        <driver name="qemu" type="qcow2"/>
+                        <source file="%s"/>
+                        <target dev="vda" bus="virtio"/>
+                    </disk>
+                    <disk type="file" device="cdrom">
+                        <driver name="qemu" type="raw"/>
+                        <source file="%s"/>
+                        <target dev="hdc" bus="ide"/>
+                        <readonly/>
+                    </disk>
+                    <interface type="bridge">
+                        <source bridge="%s"/>
+                        <model type="virtio"/>
+                    </interface>
+                    <graphics type="vnc" port="-1"/>
+                    <video>
+                        <model type="qxl"/>
+                    </video>
+                </devices>
+            </domain>',
+                $data['name'],
+                (int)$data['memory'],
+                (int)$data['vcpus'],
+                $vhdPath,
+                $data['iso_image'],
+                $data['network_bridge']
+            );
+
+            // VM definieren
+            $domain = libvirt_domain_define_xml($this->connection, $xml);
+            if (!$domain) {
+                throw new \Exception($this->translator->trans('error.create_vm_failed'));
+            }
+
+            // VM direkt starten
+            $result = libvirt_domain_create($domain);
+
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $data['name'],
+                action: 'create',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+        } catch (\Exception $e) {
+            // VHD-Datei aufräumen bei Fehler
+            if (isset($vhdPath) && file_exists($vhdPath)) {
+                unlink($vhdPath);
+            }
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 }
