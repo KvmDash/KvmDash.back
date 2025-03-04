@@ -23,6 +23,12 @@ use Symfony\Contracts\Translation\TranslatorInterface;
             uriTemplate: '/qemu/osinfo',
             controller: self::class . '::getOsInfo',
             read: false
+        ),
+        new GetCollection(
+            name: 'get_boot_images',
+            uriTemplate: '/qemu/images',
+            controller: self::class . '::listBootImages',
+            read: false
         )
     ]
 )]
@@ -167,6 +173,113 @@ class QemuController extends AbstractController
                     'error.osinfo_list_failed',
                     ['%error%' => $e->getMessage()]
                 )
+            ], 500);
+        }
+    }
+
+    /**
+     * Listet verfügbare Boot-Images auf
+     * 
+     * Durchsucht den konfigurierten Image-Ordner nach:
+     * - ISO-Dateien (*.iso)
+     * - Raw-Images (*.img)
+     * - QCOW2-Images (*.qcow2)
+     *
+     * Format der Rückgabe:
+     * {
+     *   "status": "success",
+     *   "data": [
+     *     {
+     *       "name": "ubuntu-22.04-desktop-amd64.iso",
+     *       "type": "iso",
+     *       "size": 3276800000,
+     *       "path": "/var/lib/libvirt/images/ubuntu-22.04-desktop-amd64.iso",
+     *       "modified": "2024-03-04T15:30:00+01:00"
+     *     }
+     *   ]
+     * }
+     *
+     * @return JsonResponse Liste der verfügbaren Boot-Images
+     */
+    /**
+     * Listet verfügbare Boot/Installation ISOs auf
+     * 
+     * Durchsucht alle Storage Pools nach:
+     * - ISO-Dateien für Betriebssystem-Installation
+     * - CD/DVD Image Dateien
+     *
+     * Format der Rückgabe:
+     * {
+     *   "status": "success",
+     *   "data": [
+     *     {
+     *       "name": "ubuntu-22.04-desktop-amd64.iso",
+     *       "size": 3276800000,
+     *       "path": "/var/lib/libvirt/images/ubuntu-22.04-desktop-amd64.iso",
+     *       "modified": "2024-03-04T15:30:00+01:00",
+     *       "pool": "CDImages"
+     *     }
+     *   ]
+     * }
+     */
+    public function listBootImages(): JsonResponse
+    {
+        try {
+            $this->connect();
+            $images = [];
+
+            $pools = libvirt_list_storagepools($this->connection);
+            if (!$pools) {
+                throw new \Exception('Keine Storage Pools gefunden');
+            }
+
+            foreach ($pools as $poolName) {
+                try {
+                    $pool = libvirt_storagepool_lookup_by_name($this->connection, $poolName);
+                    if (!$pool) {
+                        continue;
+                    }
+
+                    libvirt_storagepool_refresh($pool);
+
+                    $volumes = libvirt_storagepool_list_volumes($pool);
+                    if ($volumes) {
+                        foreach ($volumes as $volumeName) {
+                            if (!str_ends_with(strtolower($volumeName), '.iso')) {
+                                continue;
+                            }
+
+                            $volume = libvirt_storagevolume_lookup_by_name($pool, $volumeName);
+                            if (!$volume) {
+                                continue;
+                            }
+
+                            $xml = libvirt_storagevolume_get_xml_desc($volume, 0);
+                            $volumeXml = simplexml_load_string($xml);
+
+                            if ($volumeXml) {
+                                $images[] = [
+                                    'name' => $volumeName,
+                                    'size' => (int)$volumeXml->capacity,
+                                    'path' => (string)$volumeXml->target->path,
+                                    'pool' => $poolName
+                                ];
+                            }
+                        }
+                    }
+                } catch (\Exception $pe) {
+                    continue;
+                }
+            }
+
+            return $this->json([
+                'status' => 'success',
+                'data' => $images
+            ]);
+        } catch (\Exception $e) {
+            return $this->json([
+                'status' => 'error',
+                'message' => $this->translator->trans('error.image_list_failed')
             ], 500);
         }
     }
