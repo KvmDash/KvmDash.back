@@ -90,7 +90,7 @@ class SystemController extends AbstractController
             return $this->json(['error' =>  $this->translator->trans('error.no_command_specified')], 400);
         }
         
-        // WICHTIG: Hier solltest du unbedingt Sicherheitsmaßnahmen einbauen!
+        // WICHTIG: Unbedingt Sicherheitsmaßnahmen einbauen!
         // Das ist nur eine Demonstration und sollte in der Produktion
         // stark eingeschränkt werden, um Injection-Angriffe zu verhindern
         
