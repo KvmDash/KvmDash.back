@@ -112,7 +112,7 @@ class VirtualizationController extends AbstractController
      * - Die Verbindung wiederzuverwenden wenn sie bereits besteht
      * - Die korrekte URI für den lokalen QEMU-Hypervisor zu verwenden
      *
-     * Verbindungsdetails:
+     * Verbindungsdetails:Im Virt
      * - URI: 'qemu:///system' für den System-Mode
      * - Authentifizierung: Über System-Berechtigungen
      * 
