@@ -27,6 +27,12 @@ use App\Dto\VirtualMachineAction;
             read: false,
             output: VirtualMachine::class,
         ),
+        new GetCollection(
+            name: 'get_domain_status',
+            uriTemplate: '/virt/domains/status',
+            controller: self::class . '::getDomainStatus',
+            read: false
+        ),
         new Post(
             name: 'start_domain',
             uriTemplate: '/virt/domain/{name}/start',
@@ -41,11 +47,12 @@ use App\Dto\VirtualMachineAction;
             read: false,
             output: VirtualMachineAction::class,
         ),
-        new GetCollection(
-            name: 'get_domain_status',
-            uriTemplate: '/virt/domains/status',
-            controller: self::class . '::getDomainStatus',
-            read: false
+        new Post(
+            name: 'reboot_domain',
+            uriTemplate: '/virt/domain/{name}/reboot',
+            controller: self::class . '::rebootDomain',
+            read: false,
+            output: VirtualMachineAction::class,
         ),
     ]
 )]
@@ -212,6 +219,32 @@ class VirtualizationController extends AbstractController
             }
 
             return $this->json($domains);
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+
+    public function rebootDomain(string $name): JsonResponse
+    {
+        try {
+            $this->connect();
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+
+            if (!$domain) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            $result = libvirt_domain_reboot($domain);
+
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'reboot',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
         }
