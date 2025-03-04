@@ -17,7 +17,6 @@ use ApiPlatform\Metadata\Post;
 use App\Dto\VirtualMachine;
 use App\Dto\VirtualMachineAction;
 
-
 #[ApiResource(
     operations: [
         new GetCollection(
@@ -67,7 +66,22 @@ use App\Dto\VirtualMachineAction;
 
 
 
-
+/**
+ * Controller für die Verwaltung virtueller Maschinen über libvirt
+ * 
+ * Diese Klasse stellt REST-API Endpunkte bereit für:
+ * - Auflisten und Status-Abfrage von VMs
+ * - Start/Stop/Reboot Operationen
+ * - Löschen von VMs inkl. Storage
+ *
+ * Technische Details:
+ * - Nutzt libvirt PHP Extension für QEMU/KVM Zugriff
+ * - Kommuniziert mit lokalem Hypervisor (qemu:///system)
+ * - Unterstützt UEFI/NVRAM und QEMU Guest Agent
+ * - Mehrsprachige Fehlermeldungen (DE/EN)
+ *
+ * @package App\Controller\Api
+ */
 class VirtualizationController extends AbstractController
 {
     private $connection;
@@ -90,7 +104,20 @@ class VirtualizationController extends AbstractController
         }
     }
 
-
+    /**
+     * Stellt eine Verbindung zum lokalen QEMU/KVM Hypervisor her
+     * 
+     * Diese private Methode wird von allen API-Endpunkten verwendet, um:
+     * - Eine Verbindung zum Hypervisor herzustellen falls noch keine existiert
+     * - Die Verbindung wiederzuverwenden wenn sie bereits besteht
+     * - Die korrekte URI für den lokalen QEMU-Hypervisor zu verwenden
+     *
+     * Verbindungsdetails:
+     * - URI: 'qemu:///system' für den System-Mode
+     * - Authentifizierung: Über System-Berechtigungen
+     * 
+     * @throws \Exception wenn die Verbindung nicht hergestellt werden kann
+     */
     private function connect(): void
     {
         if (!$this->connection) {
@@ -103,8 +130,32 @@ class VirtualizationController extends AbstractController
         }
     }
 
-
-
+    /**
+     * Listet alle verfügbaren virtuellen Maschinen auf
+     * 
+     * Diese Methode liefert eine Liste aller definierten VMs mit Basis-Informationen:
+     * - ID und Name der VM
+     * - Aktueller Status (running, stopped, etc.)
+     * - Zugewiesener und maximaler RAM
+     * - Anzahl virtueller CPUs
+     *
+     * Das Format der Rückgabe ist für die Sidebar optimiert:
+     * {
+     *   "domains": [
+     *     {
+     *       "id": "vm-1",
+     *       "name": "vm-1", 
+     *       "state": 1,         // 1=running, 5=stopped
+     *       "memory": 4194304,  // Aktueller RAM in KB
+     *       "maxMemory": 8388608, // Maximaler RAM in KB
+     *       "cpuCount": 2
+     *     }
+     *   ]
+     * }
+     * 
+     * @return JsonResponse Liste aller VMs mit Basis-Informationen
+     * @throws \Exception Bei Verbindungsproblemen zum Hypervisor
+     */
     public function listDomains(): JsonResponse
     {
         try {
@@ -139,6 +190,21 @@ class VirtualizationController extends AbstractController
         }
     }
 
+    /**
+     * Startet eine virtuelle Maschine
+     *
+     * Diese Methode startet eine VM, die sich im gestoppten Zustand befindet.
+     * Der Start erfolgt ohne Parameter und entspricht einem normalen Bootvorgang.
+     *
+     * Wichtige Hinweise:
+     * - Die VM muss definiert und nicht bereits laufend sein
+     * - Ausreichend Systemressourcen müssen verfügbar sein
+     * - QEMU Guest Agent startet erst nach vollständigem Boot
+     *
+     * @param string $name Name der virtuellen Maschine
+     * @return JsonResponse Status der Start-Operation
+     * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
+     */
 
     public function startDomain(string $name): JsonResponse
     {
@@ -163,7 +229,30 @@ class VirtualizationController extends AbstractController
         }
     }
 
-
+    /**
+     * Stoppt eine virtuelle Maschine
+     * 
+     * Diese Methode unterstützt zwei Stop-Modi:
+     * 1. Graceful Shutdown (Standard)
+     *    - Sendet ACPI-Signal zum Herunterfahren
+     *    - Erlaubt sauberes Beenden von Diensten
+     *    - VM kann Shutdown verweigern
+     * 
+     * 2. Force Stop (wenn force=true)
+     *    - Sofortiges Beenden der VM
+     *    - Vergleichbar mit Stromkabel ziehen
+     *    - Kann zu Datenverlust führen
+     * 
+     * Request-Body Format:
+     * {
+     *   "force": true|false  // Optional, default false
+     * }
+     * 
+     * @param string $name Name der virtuellen Maschine
+     * @param Request $request HTTP-Request mit force-Option
+     * @return JsonResponse Status der Stop-Operation
+     * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
+     */
     public function stopDomain(string $name, Request $request): JsonResponse
     {
         try {
@@ -196,7 +285,28 @@ class VirtualizationController extends AbstractController
     }
 
 
-
+    /**
+     * Holt den aktuellen Status aller virtuellen Maschinen
+     * 
+     * Diese Methode liefert detaillierte Statusinformationen für alle VMs:
+     * - Aktueller Zustand (running, stopped, etc.)
+     * - Zugewiesener RAM (balloon)
+     * - Anzahl virtueller CPUs
+     * - IP-Adresse (falls verfügbar via QEMU Guest Agent)
+     *
+     * Das Format der Rückgabe ist für das Frontend optimiert:
+     * {
+     *   "vm-name": {
+     *     "state.state": "1",        // 1=running, 5=stopped
+     *     "balloon.current": "4096",  // RAM in KB
+     *     "vcpu.current": "2",       // Anzahl vCPUs
+     *     "ip": "192.168.1.100"      // IP oder leer
+     *   }
+     * }
+     * 
+     * @return JsonResponse Status aller VMs als assoziatives Array
+     * @throws \Exception Bei Verbindungsproblemen zum Hypervisor
+     */
     public function getDomainStatus(): JsonResponse
     {
         try {
@@ -232,7 +342,21 @@ class VirtualizationController extends AbstractController
         }
     }
 
-
+    /**
+     * Führt einen Neustart der virtuellen Maschine durch
+     * 
+     * Der Reboot wird über das ACPI-Signal eingeleitet, was einem "sauberen" Neustart entspricht.
+     * Dies ermöglicht dem Betriebssystem, alle Dienste ordnungsgemäß herunterzufahren.
+     * 
+     * Wichtige Hinweise:
+     * - Benötigt ein funktionierendes ACPI in der VM
+     * - Das Betriebssystem muss ACPI-Signale verarbeiten können
+     * - Bei fehlgeschlagenem Reboot bleibt die VM im aktuellen Zustand
+     * 
+     * @param string $name Name der virtuellen Maschine
+     * @return JsonResponse Status der Reboot-Operation
+     * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
+     */
     public function rebootDomain(string $name): JsonResponse
     {
         try {
@@ -259,6 +383,26 @@ class VirtualizationController extends AbstractController
     }
 
 
+    /**
+     * Löscht eine virtuelle Maschine mit allen zugehörigen Dateien
+     * 
+     * Die Flags für libvirt_domain_undefine_flags setzen sich zusammen aus:
+     * 
+     * NVRAM (8):
+     * - Löscht UEFI/NVRAM Dateien
+     * - Wichtig für Windows VMs und UEFI-Boot
+     * 
+     * MANAGED_SAVE (1):
+     * - Löscht gespeicherte VM-Zustände
+     * - Vergleichbar mit Hibernate-Dateien
+     * 
+     * SNAPSHOTS_METADATA (1):
+     * - Löscht Snapshot-Informationen
+     * - Verhindert verwaiste Snapshot-Daten
+     * 
+     * Kombinierter Flag-Wert:
+     * 8 (NVRAM) + 2 (MANAGED_SAVE + SNAPSHOTS_METADATA) = 10
+     */
     public function deleteDomain(string $name, Request $request): JsonResponse
     {
         try {
@@ -291,8 +435,6 @@ class VirtualizationController extends AbstractController
             }
 
             // Domain undefine mit NVRAM flags
-            // 2 = VIR_DOMAIN_UNDEFINE_MANAGED_SAVE (1) | VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA (1)
-            // 8 = VIR_DOMAIN_UNDEFINE_NVRAM
             $result = libvirt_domain_undefine_flags($domain, 10); // 2 + 8
 
             // VHD-Dateien löschen wenn gewünscht
