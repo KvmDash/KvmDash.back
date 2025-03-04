@@ -10,6 +10,7 @@ class VirtualMachine
         public int $state = 0,
         public int $memory = 0,
         public int $maxMemory = 0,
-        public int $cpuCount = 0
+        public int $cpuCount = 0,
+        public string $ip = ''
     ) {}
 }

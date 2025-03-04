@@ -23,24 +23,30 @@ use App\Dto\VirtualMachineAction;
         new GetCollection(
             name: 'get_domains',
             uriTemplate: '/virt/domains',
-            controller: self::class.'::listDomains',
+            controller: self::class . '::listDomains',
             read: false,
             output: VirtualMachine::class,
         ),
         new Post(
             name: 'start_domain',
             uriTemplate: '/virt/domain/{name}/start',
-            controller: self::class.'::startDomain',
+            controller: self::class . '::startDomain',
             read: false,
             output: VirtualMachineAction::class,
         ),
         new Post(
             name: 'stop_domain',
             uriTemplate: '/virt/domain/{name}/stop',
-            controller: self::class.'::stopDomain',
+            controller: self::class . '::stopDomain',
             read: false,
             output: VirtualMachineAction::class,
-        )
+        ),
+        new GetCollection(
+            name: 'get_domain_status',
+            uriTemplate: '/virt/domains/status',
+            controller: self::class . '::getDomainStatus',
+            read: false
+        ),
     ]
 )]
 
@@ -51,12 +57,12 @@ class VirtualizationController extends AbstractController
 {
     private $connection;
     private $translator;
-    
+
     public function __construct(TranslatorInterface $translator, RequestStack $requestStack)
 
     {
         $this->translator = $translator;
-    
+
         $request = $requestStack->getCurrentRequest();
         if ($request) {
             $locale = $request->getPreferredLanguage(['en', 'de']) ?? 'de';
@@ -67,10 +73,9 @@ class VirtualizationController extends AbstractController
         if (!extension_loaded('libvirt')) {
             throw new \Exception($this->translator->trans('error.libvirt_not_installed'));
         }
-        
     }
 
-    
+
     private function connect(): void
     {
         if (!$this->connection) {
@@ -119,7 +124,7 @@ class VirtualizationController extends AbstractController
         }
     }
 
-    
+
     public function startDomain(string $name): JsonResponse
     {
         try {
@@ -143,7 +148,7 @@ class VirtualizationController extends AbstractController
         }
     }
 
-    
+
     public function stopDomain(string $name, Request $request): JsonResponse
     {
         try {
@@ -170,8 +175,43 @@ class VirtualizationController extends AbstractController
                 action: $force ? $this->translator->trans('libvirt_domain_force_stop') :  $this->translator->trans('libvirt_domain_graceful_stop'),
                 error: $result === false ? libvirt_get_last_error() : null
             ));
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
 
 
+
+    public function getDomainStatus(): JsonResponse
+    {
+        try {
+            $this->connect();
+            $domains = [];
+            $activeDomains = libvirt_list_domains($this->connection);
+
+            foreach ($activeDomains as $domainId) {
+                $domain = libvirt_domain_lookup_by_name($this->connection, $domainId);
+                if ($domain) {
+                    $info = libvirt_domain_get_info($domain);
+                    $xml = libvirt_domain_get_xml_desc($domain, 0);
+
+                    // Einfache IP-Adressextraktion
+                    $ip = '';
+                    if ($xml) {
+                        preg_match('/<ip address=\'([^\']+)\'/', $xml, $matches);
+                        $ip = $matches[1] ?? '';
+                    }
+
+                    $domains[$domainId] = [
+                        'state.state' => (string)($info['state'] ?? 0),
+                        'balloon.current' => (string)($info['memory'] ?? 0),
+                        'vcpu.current' => (string)($info['nrVirtCpu'] ?? 0),
+                        'ip' => $ip
+                    ];
+                }
+            }
+
+            return $this->json($domains);
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
         }
