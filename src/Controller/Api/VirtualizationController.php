@@ -6,11 +6,9 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Contracts\Translation\TranslatorInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 use ApiPlatform\Metadata\ApiResource;
-use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\GetCollection;
 use ApiPlatform\Metadata\Post;
 
@@ -172,7 +170,6 @@ class VirtualizationController extends AbstractController
             $activeDomains = libvirt_list_domains($this->connection);
 
             foreach ($activeDomains as $domainId) {
-                // Da die Domain-IDs Strings sind, nutzen wir lookup_by_name statt lookup_by_id
                 $domain = libvirt_domain_lookup_by_name($this->connection, $domainId);
 
                 if ($domain) {
