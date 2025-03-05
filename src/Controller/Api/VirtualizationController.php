@@ -396,7 +396,7 @@ class VirtualizationController extends AbstractController
      * - Löscht UEFI/NVRAM Dateien
      * - Wichtig für Windows VMs und UEFI-Boot
      * 
-     * MANAGED_SAVE (1):
+     * MANAGED_SAVE (2):
      * - Löscht gespeicherte VM-Zustände
      * - Vergleichbar mit Hibernate-Dateien
      * 
@@ -404,60 +404,88 @@ class VirtualizationController extends AbstractController
      * - Löscht Snapshot-Informationen
      * - Verhindert verwaiste Snapshot-Daten
      * 
-     * Kombinierter Flag-Wert:
-     * 8 (NVRAM) + 2 (MANAGED_SAVE + SNAPSHOTS_METADATA) = 10
+     * @param string $name Name der virtuellen Maschine
+     * @param Request $request HTTP-Request mit deleteVhd Option
+     * @return JsonResponse Status der Löschoperation
      */
     public function deleteDomain(string $name, Request $request): JsonResponse
     {
         try {
             $this->connect();
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-
+    
             if (!$domain) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-
+    
             // Prüfe ob VHD-Dateien auch gelöscht werden sollen
             $data = json_decode($request->getContent(), true);
             $deleteVhd = isset($data['deleteVhd']) && $data['deleteVhd'] === true;
-
-            // XML für Disk-Pfade und NVRAM-Check
-            $xml = libvirt_domain_get_xml_desc($domain, 0);
-            $diskPaths = [];
-
-            if ($deleteVhd && $xml) {
-                preg_match_all('/<source file=\'([^\']+)\'/', $xml, $matches);
-                $diskPaths = $matches[1] ?? [];
+    
+            if ($deleteVhd) {
+                // Alle Storage Pools durchsuchen
+                $pools = libvirt_list_storagepools($this->connection);
+                if ($pools === false) {
+                    error_log("Fehler beim Auflisten der Storage Pools: " . libvirt_get_last_error());
+                } else {
+                    foreach ($pools as $poolName) {
+                        $pool = libvirt_storagepool_lookup_by_name($this->connection, $poolName);
+                        if ($pool) {
+                            // Pool aktualisieren um neue/gelöschte Volumes zu erkennen
+                            libvirt_storagepool_refresh($pool);
+                        }
+                    }
+                }
+                
+    
+                // XML für Disk-Pfade - robusteres Pattern
+                $xml = libvirt_domain_get_xml_desc($domain, 0);
+                if ($xml) {
+                    preg_match_all('/<disk[^>]+device=[\'"]disk[\'"][^>]*>.*?<source\s+file=[\'"]([^\'""]+)[\'"].*?>/s', $xml, $matches);
+                    $diskPaths = $matches[1] ?? [];
+    
+                    foreach ($diskPaths as $path) {
+                        try {
+                            // Debug-Logging
+                            error_log("Versuche Volume zu löschen: $path");
+                            
+                            $volume = libvirt_storagevolume_lookup_by_path($this->connection, $path);
+                            if ($volume) {
+                                if (!libvirt_storagevolume_delete($volume, 0)) {
+                                    error_log("Fehler beim Löschen des Volumes: " . libvirt_get_last_error());
+                                }
+                            } else {
+                                error_log("Volume nicht gefunden: " . libvirt_get_last_error());
+                            }
+                        } catch (\Exception $e) {
+                            error_log("Exception beim Volume-Löschen: " . $e->getMessage());
+                        }
+                    }
+                }
             }
-
+    
             // Zuerst Domain stoppen falls noch aktiv
             $info = libvirt_domain_get_info($domain);
             if ($info['state'] === 1) {
                 libvirt_domain_destroy($domain);
             }
-
-            // Domain undefine mit NVRAM flags
-            $result = libvirt_domain_undefine_flags($domain, 10); // 2 + 8
-
-            // VHD-Dateien löschen wenn gewünscht
-            if ($deleteVhd && $result !== false) {
-                foreach ($diskPaths as $path) {
-                    if (file_exists($path)) {
-                        unlink($path);
-                    }
-                }
-            }
-
+    
+            // Domain undefine mit allen Flags (NVRAM + MANAGED_SAVE + SNAPSHOTS_METADATA)
+            $result = libvirt_domain_undefine_flags($domain, 11); // 8 + 2 + 1
+    
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
                 action: $deleteVhd ? 'delete_with_storage' : 'delete',
                 error: $result === false ? libvirt_get_last_error() : null
             ));
+    
         } catch (\Exception $e) {
-            return $this->json(['error' => $e->getMessage()], 500);
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
@@ -497,25 +525,25 @@ class VirtualizationController extends AbstractController
         try {
             $this->connect();
             $data = json_decode($request->getContent(), true);
-    
+
             // Default Storage Pool holen
             $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
             if (!$pool) {
                 throw new \Exception($this->translator->trans('error.storage_pool_not_found'));
             }
-    
+
             // Pool XML parsen für den Basis-Pfad
             $poolXml = libvirt_storagepool_get_xml_desc($pool, 0);
             $poolInfo = simplexml_load_string($poolXml);
             $poolPath = (string)$poolInfo->target->path;
-    
+
             if (!$poolPath || !is_dir($poolPath)) {
                 throw new \Exception($this->translator->trans('error.storage_pool_path_invalid'));
             }
-    
+
             // VHD-Pfad im Pool
             $vhdPath = $poolPath . '/' . $data['name'] . '.qcow2';
-    
+
             // QCOW2 Image erstellen
             $command = sprintf(
                 'qemu-img create -f qcow2 %s %dG',
@@ -537,8 +565,8 @@ class VirtualizationController extends AbstractController
                 <vcpu>%d</vcpu>
                 <os>
                     <type arch="x86_64">hvm</type>
-                    <boot dev="cdrom"/>
                     <boot dev="hd"/>
+                    <boot dev="cdrom"/>
                 </os>
                 <features>
                     <acpi/>
