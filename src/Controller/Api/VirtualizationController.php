@@ -600,7 +600,9 @@ class VirtualizationController extends AbstractController
                         <source bridge="%s"/>
                         <model type="virtio"/>
                     </interface>
-                    <graphics type="vnc" port="-1"/>
+                    <graphics type="spice" port="-1" autoport="yes">
+                        <listen type="address" address="0.0.0.0"/>
+                    </graphics>
                     <video>
                         <model type="qxl"/>
                     </video>
@@ -741,54 +743,59 @@ class VirtualizationController extends AbstractController
         try {
             $this->connect();
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-
+    
             if (!$domain) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-
-            // XML parsen für SPICE-Port
+    
+            // XML parsen für SPICE-Port mit xmllint (genauer als SimpleXML)
             $xml = libvirt_domain_get_xml_desc($domain, 0);
-            $xmlObj = simplexml_load_string($xml);
-
-            $spicePort = null;
-            foreach ($xmlObj->devices->graphics as $graphic) {
-                if ((string)$graphic['type'] === 'spice') {
-                    $spicePort = (int)$graphic['port'];
-                    break;
-                }
-            }
-
-            if (!$spicePort) {
+            $tmpFile = tempnam(sys_get_temp_dir(), 'vm_');
+            file_put_contents($tmpFile, $xml);
+            
+            $spicePort = (int)shell_exec("xmllint --xpath 'string(//graphics[@type=\"spice\"]/@port)' " . escapeshellarg($tmpFile));
+            unlink($tmpFile);
+    
+            if (!$spicePort || $spicePort === 0) {
                 return $this->json([
                     'error' => $this->translator->trans('error.no_spice_port')
                 ], 404);
             }
-
-            // WebSocket Port = SPICE Port + 100
-            $wsPort = $spicePort + 100;
-
+    
+            // WebSocket Port = SPICE Port + 1000 (wie im Shell-Script)
+            $wsPort = $spicePort + 1000;
+    
             // Prüfen ob WebSocket bereits läuft
-            $checkCmd = "lsof -i :$wsPort";
+            $checkCmd = "ps aux | grep -v grep | grep 'websockify $wsPort'";
             exec($checkCmd, $output, $returnVar);
-
+    
             if ($returnVar !== 0) {
                 // WebSocket noch nicht aktiv, starten
                 $cmd = sprintf(
-                    'websockify %d localhost:%d > /dev/null 2>&1 & echo $!',
+                    'nohup websockify %d localhost:%d > /dev/null 2>&1 & echo $!',
                     $wsPort,
                     $spicePort
                 );
                 exec($cmd, $output);
+    
+                // Kurz warten und prüfen ob der Prozess läuft
+                sleep(1);
+                exec($checkCmd, $output, $returnVar);
+                if ($returnVar !== 0) {
+                    throw new \Exception('Websockify konnte nicht gestartet werden');
+                }
             }
-
+    
             return $this->json([
                 'spicePort' => $spicePort,
                 'wsPort' => $wsPort,
                 'host' => 'localhost'
             ]);
+    
         } catch (\Exception $e) {
+            error_log("SPICE Connection Error: " . $e->getMessage());
             return $this->json(['error' => $e->getMessage()], 500);
         }
     }
