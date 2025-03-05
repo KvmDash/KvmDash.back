@@ -4,9 +4,11 @@ namespace App\Controller\Api;
 
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Request;
 use ApiPlatform\Metadata\ApiResource;
 use ApiPlatform\Metadata\GetCollection;
+use ApiPlatform\Metadata\Get;
+use ApiPlatform\Metadata\Post;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 
@@ -29,6 +31,16 @@ use Symfony\Contracts\Translation\TranslatorInterface;
             uriTemplate: '/qemu/images',
             controller: self::class . '::listBootImages',
             read: false
+        ),
+        new Post(
+            name: 'upload_iso',
+            uriTemplate: '/qemu/iso/upload',
+            controller: self::class . '::uploadIso'
+        ),
+        new Get(
+            name: 'iso_status',
+            uriTemplate: '/qemu/iso/status',
+            controller: self::class . '::getIsoStatus'
         )
     ]
 )]
@@ -177,30 +189,7 @@ class QemuController extends AbstractController
         }
     }
 
-    /**
-     * Listet verfügbare Boot-Images auf
-     * 
-     * Durchsucht den konfigurierten Image-Ordner nach:
-     * - ISO-Dateien (*.iso)
-     * - Raw-Images (*.img)
-     * - QCOW2-Images (*.qcow2)
-     *
-     * Format der Rückgabe:
-     * {
-     *   "status": "success",
-     *   "data": [
-     *     {
-     *       "name": "ubuntu-22.04-desktop-amd64.iso",
-     *       "type": "iso",
-     *       "size": 3276800000,
-     *       "path": "/var/lib/libvirt/images/ubuntu-22.04-desktop-amd64.iso",
-     *       "modified": "2024-03-04T15:30:00+01:00"
-     *     }
-     *   ]
-     * }
-     *
-     * @return JsonResponse Liste der verfügbaren Boot-Images
-     */
+
     /**
      * Listet verfügbare Boot/Installation ISOs auf
      * 
@@ -282,5 +271,303 @@ class QemuController extends AbstractController
                 'message' => $this->translator->trans('error.image_list_failed')
             ], 500);
         }
+    }
+
+
+    /**
+     * Startet den Download einer ISO-Datei von einer URL
+     * 
+     * Diese Methode ermöglicht das Herunterladen von ISO-Dateien in den libvirt Storage Pool.
+     * Der Download wird asynchron im Hintergrund ausgeführt und der Fortschritt kann über
+     * den Status-Endpoint überwacht werden.
+     *
+     * Anforderungen:
+     * - POST Request mit JSON Body
+     * - URL muss auf .iso Datei zeigen
+     * - Ziel Storage Pool muss existieren und beschreibbar sein
+     * - ISO darf noch nicht existieren
+     *
+     * Request Body Format:
+     * {
+     *    "url": "https://example.com/path/to/file.iso"
+     * }
+     *
+     * Erfolgreiche Antwort:
+     * {
+     *    "status": "success",
+     *    "message": "Download started",
+     *    "data": {
+     *        "pid": 12345,
+     *        "log_file": "/tmp/example_download.log"
+     *    }
+     * }
+     *
+     * Fehler Antwort:
+     * {
+     *    "status": "error",
+     *    "message": "Fehlerbeschreibung"
+     * }
+     *
+     * Technische Details:
+     * - Nutzt curl für den Download im Hintergrund
+     * - Erstellt Status-, Log- und PID-Dateien für Monitoring
+     * - Speichert in den konfigurierten libvirt Storage Pool
+     * - Automatisches Cleanup bei Fehlern
+     *
+     * @Route("/api/qemu/iso/upload", methods={"POST"})
+     * @param Request $request Symfony HTTP Request Objekt
+     * @return JsonResponse Status des Download-Starts
+     * @throws \Exception Bei ungültiger URL oder Dateisystem-Problemen
+     */
+    public function uploadIso(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true);
+
+            if (!isset($data['url'])) {
+                throw new \Exception('URL is required');
+            }
+
+            $url = $data['url'];
+
+            // URL Validierung
+            if (!filter_var($url, FILTER_VALIDATE_URL)) {
+                throw new \Exception('Invalid URL format');
+            }
+
+            // Prüfe auf .iso Endung
+            if (!str_ends_with(strtolower($url), '.iso')) {
+                throw new \Exception('URL must end with .iso');
+            }
+
+            // Hole Storage Pool Info
+            $this->connect();
+            $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
+            if (!$pool) {
+                throw new \Exception('Default storage pool not found');
+            }
+
+            $poolXml = simplexml_load_string(libvirt_storagepool_get_xml_desc($pool, 0));
+            $targetDir = (string)$poolXml->target->path;
+
+            $filename = basename($url);
+            $fileBase = pathinfo($filename, PATHINFO_FILENAME);
+            $targetPath = rtrim($targetDir, '/') . '/' . $filename;
+
+            if (file_exists($targetPath)) {
+                throw new \Exception('ISO file already exists');
+            }
+
+            // Log-Datei und PID-Datei Setup
+            $logFile = sys_get_temp_dir() . '/' . $fileBase . '_download.log';
+            $pidFile = sys_get_temp_dir() . '/' . $fileBase . '_download.pid';
+            $statusFile = sys_get_temp_dir() . '/' . $fileBase . '_download_status.json';
+
+
+
+
+            // Starte Download im Hintergrund mit verbessertem Logging
+            $cmd = sprintf(
+                '/usr/bin/curl -L %s -o %s --progress-bar >> %s 2>&1 & echo $! > %s',
+                escapeshellarg($url),
+                escapeshellarg($targetPath),
+                escapeshellarg($logFile),
+                escapeshellarg($pidFile)
+            );
+
+            exec($cmd);
+
+            // Prüfe ob PID-File erstellt wurde
+            if (!file_exists($pidFile)) {
+                throw new \Exception('Download could not be started');
+            }
+
+            $pid = trim(file_get_contents($pidFile));
+            if (!$pid || !is_numeric($pid)) {
+                throw new \Exception('Invalid PID generated');
+            }
+
+            // Setze initialen Download-Status
+            $this->updateDownloadStatus($statusFile, 'downloading', 'Download started', [
+                'pid' => (int)$pid,
+                'url' => $url,
+                'target_path' => $targetPath,
+                'log_file' => $logFile,
+                'start_time' => time()
+            ]);
+
+            return $this->json([
+                'status' => 'success',
+                'message' => 'Download started',
+                'data' => [
+                    'pid' => (int)$pid,
+                    'log_file' => $logFile
+                ]
+            ]);
+        } catch (\Exception $e) {
+            // Cleanup bei Fehler
+            if (isset($logFile) && file_exists($logFile)) {
+                unlink($logFile);
+            }
+            if (isset($pidFile) && file_exists($pidFile)) {
+                unlink($pidFile);
+            }
+
+            return $this->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
+     * Prüft den Status eines ISO-Downloads
+     * 
+     * Diese Methode überwacht alle aktiven ISO-Downloads und deren Status.
+     * Sie sucht nach Status-Dateien im temporären Verzeichnis und prüft:
+     * - Ob Downloads noch aktiv sind (PID existiert)
+     * - Ob Downloads erfolgreich abgeschlossen wurden
+     * - Ob Fehler aufgetreten sind
+     *
+     * Erfolgsantwort wenn Downloads aktiv:
+     * {
+     *    "status": "success",
+     *    "data": [
+     *      {
+     *        "status": "downloading",
+     *        "message": "Download started",
+     *        "timestamp": 1234567890,
+     *        "data": {
+     *          "pid": 12345,
+     *          "url": "https://example.com/file.iso",
+     *          "target_path": "/var/lib/libvirt/images/file.iso",
+     *          "log_file": "/tmp/file_download.log",
+     *          "start_time": 1234567890
+     *        }
+     *      }
+     *    ]
+     * }
+     *
+     * Erfolgsantwort wenn keine Downloads:
+     * {
+     *    "status": "success",
+     *    "data": []
+     * }
+     *
+     * Technische Details:
+     * - Prüft PID-Existenz via /proc/{pid}
+     * - Bereinigt Status-Dateien automatisch
+     * - Löscht Log- und PID-Dateien nach Abschluss
+     * - Aktualisiert Download-Status bei Beendigung
+     *
+     * @Route("/api/qemu/iso/status", methods={"GET"})
+     * @return JsonResponse Status aller aktiven Downloads
+     */
+    public function getIsoStatus(): JsonResponse
+    {
+        $tempDir = sys_get_temp_dir();
+        $downloads = [];
+
+        // Suche alle Status-Dateien
+        $files = glob($tempDir . '/*_download_status.json');
+
+        foreach ($files as $statusFile) {
+            $status = json_decode(file_get_contents($statusFile), true);
+            if ($status === null) {
+                unlink($statusFile); // Ungültige Status-Datei löschen
+                continue;
+            }
+
+            // Prüfe Download-Status
+            if ($status['status'] === 'downloading' && isset($status['data']['pid'])) {
+                if (!file_exists("/proc/{$status['data']['pid']}")) {
+                    $targetPath = $status['data']['target_path'];
+                    if (file_exists($targetPath)) {
+                        // Download erfolgreich
+                        $this->updateDownloadStatus(
+                            $statusFile,
+                            'completed',
+                            'Download finished',
+                            [
+                                'url' => $status['data']['url'],
+                                'target_path' => $targetPath,
+                                'filesize' => filesize($targetPath),
+                                'end_time' => time()
+                            ]
+                        );
+
+                        // Status ein letztes Mal laden und dann aufräumen
+                        $status = json_decode(file_get_contents($statusFile), true);
+                        $downloads[] = $status;
+                        unlink($statusFile); // Status-Datei löschen
+
+                        // Auch Log und PID Dateien aufräumen
+                        if (isset($status['data']['log_file']) && file_exists($status['data']['log_file'])) {
+                            unlink($status['data']['log_file']);
+                        }
+                        $pidFile = str_replace('_download_status.json', '_download.pid', $statusFile);
+                        if (file_exists($pidFile)) {
+                            unlink($pidFile);
+                        }
+
+                        continue;
+                    } else {
+                        // Download fehlgeschlagen
+                        $this->updateDownloadStatus($statusFile, 'failed', 'Download failed');
+                        unlink($statusFile);
+                        continue;
+                    }
+                }
+                // Nur aktive Downloads zur Liste hinzufügen
+                $downloads[] = $status;
+            }
+        }
+
+        return $this->json([
+            'status' => 'success',
+            'data' => $downloads
+        ]);
+    }
+
+
+    /**
+     * Aktualisiert oder erstellt eine Status-Datei für einen ISO-Download
+     * 
+     * Diese private Hilfsmethode verwaltet den Status eines Downloads durch:
+     * - Erstellen/Aktualisieren einer JSON-Status-Datei
+     * - Speichern von Status-Informationen wie PID, URL, Pfade
+     * - Tracking von Start- und Endzeit
+     * 
+     * Parameter:
+     * @param string $statusFile Pfad zur Status-Datei (z.B. /tmp/debian-12_download_status.json)
+     * @param string $status     Aktueller Status ('downloading', 'completed', 'failed')
+     * @param string $message    Optionale Statusmeldung (default: '')
+     * @param array  $data       Zusätzliche Daten wie PID, URLs, Pfade (default: [])
+     * 
+     * Status-Datei Format:
+     * {
+     *    "status": "downloading",
+     *    "message": "Download started",
+     *    "timestamp": 1234567890,
+     *    "data": {
+     *      "pid": 12345,
+     *      "url": "https://example.com/file.iso",
+     *      "target_path": "/var/lib/libvirt/images/file.iso",
+     *      "log_file": "/tmp/file_download.log",
+     *      "start_time": 1234567890
+     *    }
+     * }
+     * 
+     * @return void
+     */
+    private function updateDownloadStatus(string $statusFile, string $status, string $message = '', array $data = []): void
+    {
+        $statusData = [
+            'status' => $status,
+            'message' => $message,
+            'timestamp' => time(),
+            'data' => $data
+        ];
+        file_put_contents($statusFile, json_encode($statusData));
     }
 }
