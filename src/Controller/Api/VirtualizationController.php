@@ -36,6 +36,13 @@ use App\Dto\VirtualMachineAction;
             controller: self::class . '::getDomainDetails',
             read: false
         ),
+        // In den ApiResource annotations
+        new GetCollection(
+            name: 'get_spice_connection',
+            uriTemplate: '/virt/domain/{name}/spice',
+            controller: self::class . '::getSpiceConnection',
+            read: false
+        ),
         new Post(
             name: 'start_domain',
             uriTemplate: '/virt/domain/{name}/start',
@@ -419,17 +426,17 @@ class VirtualizationController extends AbstractController
         try {
             $this->connect();
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-    
+
             if (!$domain) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-    
+
             // Prüfe ob VHD-Dateien auch gelöscht werden sollen
             $data = json_decode($request->getContent(), true);
             $deleteVhd = isset($data['deleteVhd']) && $data['deleteVhd'] === true;
-    
+
             if ($deleteVhd) {
                 // Alle Storage Pools durchsuchen
                 $pools = libvirt_list_storagepools($this->connection);
@@ -444,19 +451,19 @@ class VirtualizationController extends AbstractController
                         }
                     }
                 }
-                
-    
+
+
                 // XML für Disk-Pfade - robusteres Pattern
                 $xml = libvirt_domain_get_xml_desc($domain, 0);
                 if ($xml) {
                     preg_match_all('/<disk[^>]+device=[\'"]disk[\'"][^>]*>.*?<source\s+file=[\'"]([^\'""]+)[\'"].*?>/s', $xml, $matches);
                     $diskPaths = $matches[1] ?? [];
-    
+
                     foreach ($diskPaths as $path) {
                         try {
                             // Debug-Logging
                             error_log("Versuche Volume zu löschen: $path");
-                            
+
                             $volume = libvirt_storagevolume_lookup_by_path($this->connection, $path);
                             if ($volume) {
                                 if (!libvirt_storagevolume_delete($volume, 0)) {
@@ -471,23 +478,22 @@ class VirtualizationController extends AbstractController
                     }
                 }
             }
-    
+
             // Zuerst Domain stoppen falls noch aktiv
             $info = libvirt_domain_get_info($domain);
             if ($info['state'] === 1) {
                 libvirt_domain_destroy($domain);
             }
-    
+
             // Domain undefine mit allen Flags (NVRAM + MANAGED_SAVE + SNAPSHOTS_METADATA)
             $result = libvirt_domain_undefine_flags($domain, 11); // 8 + 2 + 1
-    
+
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
                 action: $deleteVhd ? 'delete_with_storage' : 'delete',
                 error: $result === false ? libvirt_get_last_error() : null
             ));
-    
         } catch (\Exception $e) {
             return $this->json([
                 'error' => $e->getMessage()
@@ -718,7 +724,70 @@ class VirtualizationController extends AbstractController
                 'graphics' => $graphics,
                 'stats' => $stats
             ]);
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
 
+
+    /**
+     * Erstellt oder findet eine WebSocket-Verbindung für SPICE
+     * 
+     * @param string $name Name der virtuellen Maschine
+     * @return JsonResponse WebSocket-Verbindungsdaten
+     */
+    public function getSpiceConnection(string $name): JsonResponse
+    {
+        try {
+            $this->connect();
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+
+            if (!$domain) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            // XML parsen für SPICE-Port
+            $xml = libvirt_domain_get_xml_desc($domain, 0);
+            $xmlObj = simplexml_load_string($xml);
+
+            $spicePort = null;
+            foreach ($xmlObj->devices->graphics as $graphic) {
+                if ((string)$graphic['type'] === 'spice') {
+                    $spicePort = (int)$graphic['port'];
+                    break;
+                }
+            }
+
+            if (!$spicePort) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.no_spice_port')
+                ], 404);
+            }
+
+            // WebSocket Port = SPICE Port + 100
+            $wsPort = $spicePort + 100;
+
+            // Prüfen ob WebSocket bereits läuft
+            $checkCmd = "lsof -i :$wsPort";
+            exec($checkCmd, $output, $returnVar);
+
+            if ($returnVar !== 0) {
+                // WebSocket noch nicht aktiv, starten
+                $cmd = sprintf(
+                    'websockify %d localhost:%d > /dev/null 2>&1 & echo $!',
+                    $wsPort,
+                    $spicePort
+                );
+                exec($cmd, $output);
+            }
+
+            return $this->json([
+                'spicePort' => $spicePort,
+                'wsPort' => $wsPort,
+                'host' => 'localhost'
+            ]);
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
         }
