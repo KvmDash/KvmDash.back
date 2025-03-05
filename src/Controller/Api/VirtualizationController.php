@@ -30,6 +30,12 @@ use App\Dto\VirtualMachineAction;
             controller: self::class . '::getDomainStatus',
             read: false
         ),
+        new GetCollection(
+            name: 'get_domain_details',
+            uriTemplate: '/virt/domain/{name}/details',
+            controller: self::class . '::getDomainDetails',
+            read: false
+        ),
         new Post(
             name: 'start_domain',
             uriTemplate: '/virt/domain/{name}/start',
@@ -625,6 +631,96 @@ class VirtualizationController extends AbstractController
             return $this->json([
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Holt detaillierte Informationen einer VM
+     * 
+     * Liefert alle verfügbaren Informationen inkl:
+     * - Grundkonfiguration (CPU, RAM, Disk)
+     * - Aktuelle Auslastung
+     * - Netzwerkkonfiguration
+     * - SPICE/VNC Zugriffsdaten
+     * - Storage Informationen
+     * 
+     * @param string $name Name der virtuellen Maschine
+     * @return JsonResponse Detaillierte VM Informationen
+     */
+    public function getDomainDetails(string $name): JsonResponse
+    {
+        try {
+            $this->connect();
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+
+            if (!$domain) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            // Basis-Informationen
+            $info = libvirt_domain_get_info($domain);
+            $xml = libvirt_domain_get_xml_desc($domain, 0);
+            $xmlObj = simplexml_load_string($xml);
+
+            // Storage Informationen extrahieren
+            $disks = [];
+            foreach ($xmlObj->devices->disk as $disk) {
+                if ((string)$disk['device'] === 'disk') {
+                    $disks[] = [
+                        'device' => (string)$disk->target['dev'],
+                        'driver' => (string)$disk->driver['type'],
+                        'path' => (string)$disk->source['file'],
+                        'bus' => (string)$disk->target['bus']
+                    ];
+                }
+            }
+
+            // Netzwerk Informationen
+            $networks = [];
+            foreach ($xmlObj->devices->interface as $interface) {
+                $networks[] = [
+                    'type' => (string)$interface['type'],
+                    'mac' => (string)$interface->mac['address'],
+                    'model' => (string)$interface->model['type'],
+                    'bridge' => (string)$interface->source['bridge']
+                ];
+            }
+
+            // SPICE/VNC Informationen
+            $graphics = [];
+            foreach ($xmlObj->devices->graphics as $graphic) {
+                $graphics[] = [
+                    'type' => (string)$graphic['type'],
+                    'port' => (string)$graphic['port'],
+                    'listen' => (string)$graphic['listen'],
+                    'passwd' => (string)$graphic['passwd']
+                ];
+            }
+
+            // Performance Metriken (CPU, RAM, Disk I/O)
+            $stats = [
+                'cpu_time' => libvirt_domain_get_info($domain)['cpuUsed'] ?? 0,
+                'memory_usage' => $info['memory'] ?? 0,
+                'max_memory' => $info['maxMem'] ?? 0
+            ];
+
+            return $this->json([
+                'name' => $name,
+                'state' => $info['state'] ?? 0,
+                'maxMemory' => $info['maxMem'] ?? 0,
+                'memory' => $info['memory'] ?? 0,
+                'cpuCount' => $info['nrVirtCpu'] ?? 0,
+                'cpuTime' => $info['cpuUsed'] ?? 0,
+                'disks' => $disks,
+                'networks' => $networks,
+                'graphics' => $graphics,
+                'stats' => $stats
+            ]);
+
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
         }
     }
 }
