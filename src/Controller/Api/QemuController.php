@@ -41,7 +41,12 @@ use Symfony\Contracts\Translation\TranslatorInterface;
             name: 'iso_status',
             uriTemplate: '/qemu/iso/status',
             controller: self::class . '::getIsoStatus'
-        )
+        ),
+        new Post(
+            name: 'delete_iso',
+            uriTemplate: '/qemu/iso/delete',
+            controller: self::class . '::deleteIso'
+        ),
     ]
 )]
 
@@ -569,5 +574,103 @@ class QemuController extends AbstractController
             'data' => $data
         ];
         file_put_contents($statusFile, json_encode($statusData));
+    }
+
+
+
+    /**
+     * Löscht eine ISO-Datei aus dem Storage Pool
+     * 
+     * Diese Methode löscht eine spezifische ISO-Datei:
+     * - Prüft ob die Datei existiert
+     * - Prüft ob die Datei im korrekten Pool liegt
+     * - Löscht die Datei über libvirt API
+     *
+     * Request Body Format:
+     * {
+     *    "path": "/var/lib/libvirt/images/example.iso"
+     * }
+     *
+     * Erfolgsantwort:
+     * {
+     *    "status": "success",
+     *    "message": "ISO successfully deleted"
+     * }
+     *
+     * @param Request $request Symfony HTTP Request Objekt
+     * @return JsonResponse Status der Löschoperation
+     */
+    public function deleteIso(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true);
+
+            if (!isset($data['path'])) {
+                throw new \Exception('Path is required');
+            }
+
+            $path = $data['path'];
+
+            // Prüfe ob Datei existiert
+            if (!file_exists($path)) {
+                throw new \Exception('ISO file not found');
+            }
+
+            // Prüfe ob es sich um eine ISO-Datei handelt
+            if (!str_ends_with(strtolower($path), '.iso')) {
+                throw new \Exception('File is not an ISO image');
+            }
+
+            $this->connect();
+
+            // Finde den Pool und Volume für die Datei
+            $pools = libvirt_list_storagepools($this->connection);
+            $volumeFound = false;
+
+            foreach ($pools as $poolName) {
+                $pool = libvirt_storagepool_lookup_by_name($this->connection, $poolName);
+                if (!$pool) {
+                    continue;
+                }
+
+                libvirt_storagepool_refresh($pool);
+                $volumes = libvirt_storagepool_list_volumes($pool);
+
+                if ($volumes) {
+                    foreach ($volumes as $volumeName) {
+                        $volume = libvirt_storagevolume_lookup_by_name($pool, $volumeName);
+                        if (!$volume) {
+                            continue;
+                        }
+
+                        $xml = libvirt_storagevolume_get_xml_desc($volume, 0);
+                        $volumeXml = simplexml_load_string($xml);
+
+                        if ($volumeXml && (string)$volumeXml->target->path === $path) {
+                            // Volume gefunden, jetzt löschen
+                            if (libvirt_storagevolume_delete($volume) === false) {
+                                throw new \Exception('Failed to delete ISO file');
+                            }
+                            $volumeFound = true;
+                            break 2;
+                        }
+                    }
+                }
+            }
+
+            if (!$volumeFound) {
+                throw new \Exception('ISO file not found in any storage pool');
+            }
+
+            return $this->json([
+                'status' => 'success',
+                'message' => 'ISO successfully deleted'
+            ]);
+        } catch (\Exception $e) {
+            return $this->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
+        }
     }
 }
