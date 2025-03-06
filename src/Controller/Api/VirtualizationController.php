@@ -568,71 +568,54 @@ class VirtualizationController extends AbstractController
                 throw new \Exception($this->translator->trans('error.create_disk_failed'));
             }
 
-            // XML-Template für die VM
-            $xml = sprintf(
-                '<?xml version="1.0" encoding="UTF-8"?>
-            <domain type="kvm">
-                <name>%s</name>
-                <memory unit="MiB">%d</memory>
-                <vcpu>%d</vcpu>
-                <os>
-                    <type arch="x86_64">hvm</type>
-                    <boot dev="hd"/>
-                    <boot dev="cdrom"/>
-                </os>
-                <features>
-                    <acpi/>
-                    <apic/>
-                </features>
-                <devices>
-                    <disk type="file" device="disk">
-                        <driver name="qemu" type="qcow2"/>
-                        <source file="%s"/>
-                        <target dev="vda" bus="virtio"/>
-                    </disk>
-                    <disk type="file" device="cdrom">
-                        <driver name="qemu" type="raw"/>
-                        <source file="%s"/>
-                        <target dev="hdc" bus="ide"/>
-                        <readonly/>
-                    </disk>
-                    <interface type="bridge">
-                        <source bridge="%s"/>
-                        <model type="virtio"/>
-                    </interface>
-                    <graphics type="spice" port="-1" autoport="yes">
-                        <listen type="address" address="0.0.0.0"/>
-                    </graphics>
-                    <video>
-                        <model type="qxl"/>
-                    </video>
-                </devices>
-            </domain>',
-                $data['name'],
+            // Prüfe ob OS-Variant angegeben wurde, ansonsten setze Standard
+            $osVariant = $data['os_variant'] ?? 'generic';
+            
+            // Wähle die richtige Netzwerkkonfiguration
+            $networkOption = '';
+            if ($data['network_bridge'] === 'default') {
+                $networkOption = 'network=default';
+            } else {
+                $networkOption = 'bridge=' . $data['network_bridge'];
+            }
+            
+            // Verwende virt-install statt manueller XML-Generierung
+            $virtInstallCmd = sprintf(
+                'virt-install --connect qemu:///system --name %s --memory %d --vcpus %d --disk path=%s,format=qcow2 --cdrom %s --network %s --graphics spice --noautoconsole --os-variant name=%s',
+                escapeshellarg($data['name']),
                 (int)$data['memory'],
                 (int)$data['vcpus'],
-                $vhdPath,
-                $data['iso_image'],
-                $data['network_bridge']
+                escapeshellarg($vhdPath),
+                escapeshellarg($data['iso_image']),
+                escapeshellarg($networkOption),
+                escapeshellarg($osVariant)
             );
-
-            // VM definieren
-            $domain = libvirt_domain_define_xml($this->connection, $xml);
-            if (!$domain) {
-                throw new \Exception($this->translator->trans('error.create_vm_failed'));
+            
+            exec($virtInstallCmd, $virtOutput, $virtReturnVar);
+            
+            if ($virtReturnVar !== 0) {
+                // Bei Fehler die erstellte Disk löschen
+                if (file_exists($vhdPath)) {
+                    unlink($vhdPath);
+                }
+                throw new \Exception($this->translator->trans('error.create_vm_failed') . ': ' . implode("\n", $virtOutput));
             }
-
-            // VM direkt starten
-            $result = libvirt_domain_create($domain);
-
+            
+            // Warte kurz, damit die VM ordnungsgemäß registriert wird
+            sleep(2);
+            
+            // Domain nach der Erstellung abrufen
+            $domain = libvirt_domain_lookup_by_name($this->connection, $data['name']);
+            
+            // Status der Erstellung zurückgeben
             return $this->json(new VirtualMachineAction(
-                success: $result !== false,
+                success: $domain !== false,
                 domain: $data['name'],
                 action: 'create',
-                error: $result === false ? libvirt_get_last_error() : null
+                error: $domain === false ? libvirt_get_last_error() : null
             ));
         } catch (\Exception $e) {
-            // VHD-Datei aufräumen bei Fehler
+            // Aufräumen bei Fehlern
             if (isset($vhdPath) && file_exists($vhdPath)) {
                 unlink($vhdPath);
             }
