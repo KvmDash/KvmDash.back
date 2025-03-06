@@ -507,9 +507,8 @@ class VirtualizationController extends AbstractController
      * 
      * Diese Methode erstellt eine neue VM mit folgenden Schritten:
      * 1. Erstellen einer QCOW2 Image-Datei als virtuelle Festplatte
-     * 2. Generieren der VM-Definition im libvirt XML-Format
-     * 3. Registrieren der VM beim Hypervisor
-     * 4. Automatischer Start der VM
+     * 2. Verwenden von virt-install zur Erstellung und Registrierung der VM
+     * 3. Automatischer Start der VM
      *
      * Erwartetes Request-Format:
      * {
@@ -522,11 +521,10 @@ class VirtualizationController extends AbstractController
      * }
      * 
      * Die erstellte VM enthält:
-     * - QCOW2 Festplatte mit virtio Treibern
-     * - IDE CD-ROM mit Boot-ISO
-     * - VirtIO Netzwerk-Interface
-     * - QXL Grafiktreiber für bessere Performance
-     * - VNC/Spice Konsole für Remote-Zugriff
+     * - QCOW2 Festplatte
+     * - CD-ROM mit Boot-ISO
+     * - Netzwerk-Interface
+     * - SPICE Konsole für Remote-Zugriff
      * 
      * @param Request $request HTTP-Request mit VM-Konfiguration
      * @return JsonResponse Status der Erstellungsoperation
