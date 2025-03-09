@@ -579,7 +579,7 @@ class VirtualizationController extends AbstractController
             
             // Verwende virt-install statt manueller XML-Generierung
             $virtInstallCmd = sprintf(
-                'virt-install --connect qemu:///system --name %s --memory %d --vcpus %d --disk path=%s,format=qcow2 --cdrom %s --network %s --graphics spice --noautoconsole --os-variant name=%s',
+                'virt-install --connect qemu:///system --name %s --memory %d --vcpus %d --disk path=%s,format=qcow2 --cdrom %s --network %s --graphics spice --noautoconsole --os-variant %s',
                 escapeshellarg($data['name']),
                 (int)$data['memory'],
                 (int)$data['vcpus'],
@@ -653,6 +653,36 @@ class VirtualizationController extends AbstractController
             $xml = libvirt_domain_get_xml_desc($domain, 0);
             $xmlObj = simplexml_load_string($xml);
 
+            // Detaillierte Speicherstatistiken abrufen
+            $memoryStats = libvirt_domain_memory_stats($domain);
+            
+            // Speicherstatistiken gemäß der virDomainMemoryStatTags:
+            // '7' (RSS): Resident Set Size - tatsächlich belegter physischer Speicher
+            // '8' (USABLE): Verfügbarer Speicher ohne zu swappen (entspricht "verfügbar" in free)
+            // '4' (UNUSED): Vollständig freier Speicher (entspricht "frei" in free)
+            // '10' (DISK_CACHES): Disk-Caches, die schnell freigegeben werden können
+            // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainMemoryStatStruct
+            
+            // Tatsächlich benutzter Speicher (RSS)
+            $actualMemoryUsage = isset($memoryStats['7']) ? (int)$memoryStats['7'] : $info['memory'];
+            
+            // Verfügbarer Speicher (USABLE) - entspricht dem "verfügbar"-Wert in free
+            $availableMemory = isset($memoryStats['8']) ? (int)$memoryStats['8'] : 0;
+            
+            // Fallbacks, wenn die Werte nicht verfügbar sind
+            if ($availableMemory <= 0) {
+                // Alternative Berechnung, wenn USABLE nicht verfügbar ist
+                $freeMemory = isset($memoryStats['4']) ? (int)$memoryStats['4'] : 0;
+                $diskCaches = isset($memoryStats['10']) ? (int)$memoryStats['10'] : 0;
+                $availableMemory = $freeMemory + $diskCaches;
+                
+                // Wenn immer noch 0, dann Differenz aus maxMem und RSS verwenden
+                if ($availableMemory <= 0) {
+                    $availableMemory = $info['maxMem'] - $actualMemoryUsage;
+                    if ($availableMemory < 0) $availableMemory = 0;
+                }
+            }
+            
             // Storage Informationen extrahieren
             $disks = [];
             foreach ($xmlObj->devices->disk as $disk) {
@@ -688,18 +718,21 @@ class VirtualizationController extends AbstractController
                 ];
             }
 
-            // Performance Metriken (CPU, RAM, Disk I/O)
+            // Performance Metriken mit korrekten Speicherinformationen
             $stats = [
-                'cpu_time' => libvirt_domain_get_info($domain)['cpuUsed'] ?? 0,
-                'memory_usage' => $info['memory'] ?? 0,
-                'max_memory' => $info['maxMem'] ?? 0
+                'cpu_time' => $info['cpuUsed'] ?? 0,
+                'memory_usage' => $actualMemoryUsage,
+                'available_memory' => $availableMemory,
+                'max_memory' => $info['maxMem'] ?? 0,
+                'memory_details' => $memoryStats // Detaillierte Speicherstatistiken für Debugging
             ];
 
             return $this->json([
                 'name' => $name,
                 'state' => $info['state'] ?? 0,
                 'maxMemory' => $info['maxMem'] ?? 0,
-                'memory' => $info['memory'] ?? 0,
+                'memory' => $actualMemoryUsage, // Tatsächlich genutzter Speicher (RSS)
+                'availableMemory' => $availableMemory, // Verfügbarer Speicher (wert aus key '4')
                 'cpuCount' => $info['nrVirtCpu'] ?? 0,
                 'cpuTime' => $info['cpuUsed'] ?? 0,
                 'disks' => $disks,
