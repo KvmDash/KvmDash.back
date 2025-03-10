@@ -577,9 +577,8 @@ class VirtualizationController extends AbstractController
                 $networkOption = 'bridge=' . $data['network_bridge'];
             }
             
-            // Verwende virt-install statt manueller XML-Generierung
             $virtInstallCmd = sprintf(
-                'virt-install --connect qemu:///system --name %s --memory %d --vcpus %d --disk path=%s,format=qcow2 --cdrom %s --network %s --graphics spice --noautoconsole --os-variant %s',
+                'virt-install --connect qemu:///system --name %s --memory %d --vcpus %d --disk path=%s,format=qcow2 --cdrom %s --network %s --graphics spice --video model=vga --noautoconsole --os-variant %s',
                 escapeshellarg($data['name']),
                 (int)$data['memory'],
                 (int)$data['vcpus'],
@@ -587,7 +586,9 @@ class VirtualizationController extends AbstractController
                 escapeshellarg($data['iso_image']),
                 escapeshellarg($networkOption),
                 escapeshellarg($osVariant)
-            );
+            ); 
+
+
             
             exec($virtInstallCmd, $virtOutput, $virtReturnVar);
             
