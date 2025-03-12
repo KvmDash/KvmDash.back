@@ -364,12 +364,20 @@ class QemuController extends AbstractController
 
             // Hole Storage Pool Info
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception('Invalid libvirt connection');
+            }
+            
             $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
-            if (!$pool) {
+            if (!is_resource($pool)) {
                 throw new \Exception('Default storage pool not found');
             }
-
-            $poolXml = simplexml_load_string(libvirt_storagepool_get_xml_desc($pool, 0));
+            
+            $poolXml = simplexml_load_string(libvirt_storagepool_get_xml_desc($pool, null));
+            if ($poolXml === false) {
+                throw new \Exception('Could not parse storage pool XML');
+            }
+            
             $targetDir = (string)$poolXml->target->path;
 
             $filename = basename($url);
