@@ -148,8 +148,8 @@ class VirtualizationController extends AbstractController
             $this->connection = libvirt_connect('qemu:///system', false, []);
             if (!is_resource($this->connection)) {
                 throw new \Exception(
-                    $this->translator->trans('error.libvirt_connection_failed') . 
-                    libvirt_get_last_error()
+                    $this->translator->trans('error.libvirt_connection_failed') .
+                        libvirt_get_last_error()
                 );
             }
         }
@@ -188,16 +188,16 @@ class VirtualizationController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
-    
+
             $domains = [];
             $activeDomains = libvirt_list_domains($this->connection);
-            
+
             foreach ($activeDomains as $domainId) {
                 $domain = libvirt_domain_lookup_by_name($this->connection, $domainId);
                 if (!is_resource($domain)) {
                     continue;
                 }
-    
+
                 $info = libvirt_domain_get_info($domain);
                 $domains[] = new VirtualMachine(
                     id: $domainId,
@@ -208,7 +208,7 @@ class VirtualizationController extends AbstractController
                     cpuCount: $info['nrVirtCpu'] ?? 0
                 );
             }
-    
+
             return $this->json(['domains' => $domains]);
         } catch (\Exception $e) {
             return $this->json([
@@ -233,33 +233,33 @@ class VirtualizationController extends AbstractController
      * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
      */
 
-     public function startDomain(string $name): JsonResponse
-     {
-         try {
-             $this->connect();
-             if (!is_resource($this->connection)) {
-                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
-             }
-     
-             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-             if (!is_resource($domain)) {
-                 return $this->json([
-                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
-                 ], 404);
-             }
-     
-             $result = libvirt_domain_create($domain);
-     
-             return $this->json(new VirtualMachineAction(
-                 success: $result !== false,
-                 domain: $name,
-                 action: 'start',
-                 error: $result === false ? libvirt_get_last_error() : null
-             ));
-         } catch (\Exception $e) {
-             return $this->json(['error' => $e->getMessage()], 500);
-         }
-     }
+    public function startDomain(string $name): JsonResponse
+    {
+        try {
+            $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            $result = libvirt_domain_create($domain);
+
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'start',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
 
     /**
      * Stoppt eine virtuelle Maschine
@@ -292,14 +292,14 @@ class VirtualizationController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
-    
+
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-    
+
             // JSON-Daten validieren
             $data = json_decode($request->getContent(), true);
             if (!is_array($data)) {
@@ -307,14 +307,14 @@ class VirtualizationController extends AbstractController
                     'error' => $this->translator->trans('error.invalid_json')
                 ], 400);
             }
-    
+
             $force = isset($data['force']) && $data['force'] === true;
-    
+
             // Domain stoppen
-            $result = $force ? 
-                libvirt_domain_destroy($domain) : 
+            $result = $force ?
+                libvirt_domain_destroy($domain) :
                 libvirt_domain_shutdown($domain);
-    
+
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
@@ -358,26 +358,26 @@ class VirtualizationController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
-    
+
             $domains = [];
             $activeDomains = libvirt_list_domains($this->connection);
-    
+
             foreach ($activeDomains as $domainId) {
                 $domain = libvirt_domain_lookup_by_name($this->connection, $domainId);
                 if (!is_resource($domain)) {
                     continue;
                 }
-    
+
                 $info = libvirt_domain_get_info($domain);
                 $xml = libvirt_domain_get_xml_desc($domain, null);
-    
+
                 // Einfache IP-Adressextraktion
                 $ip = '';
                 if ($xml) {
                     preg_match('/<ip address=\'([^\']+)\'/', $xml, $matches);
                     $ip = $matches[1] ?? '';
                 }
-    
+
                 $domains[$domainId] = [
                     'state.state' => (string)($info['state'] ?? 0),
                     'balloon.current' => (string)($info['memory'] ?? 0),
@@ -385,7 +385,7 @@ class VirtualizationController extends AbstractController
                     'ip' => $ip
                 ];
             }
-    
+
             return $this->json($domains);
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
@@ -414,16 +414,16 @@ class VirtualizationController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
-    
+
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-    
+
             $result = libvirt_domain_reboot($domain);
-    
+
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
@@ -464,14 +464,14 @@ class VirtualizationController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
-    
+
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-    
+
             // JSON-Daten validieren
             $data = json_decode($request->getContent(), true);
             if (!is_array($data)) {
@@ -479,9 +479,9 @@ class VirtualizationController extends AbstractController
                     'error' => $this->translator->trans('error.invalid_json')
                 ], 400);
             }
-    
+
             $deleteVhd = isset($data['deleteVhd']) && $data['deleteVhd'] === true;
-    
+
 
             if ($deleteVhd) {
                 // Alle Storage Pools durchsuchen
@@ -494,7 +494,7 @@ class VirtualizationController extends AbstractController
                             error_log("Ungültiger Pool-Name übersprungen");
                             continue;
                         }
-            
+
                         $pool = libvirt_storagepool_lookup_by_name($this->connection, $poolName);
                         if (is_resource($pool)) {
                             libvirt_storagepool_refresh($pool);
@@ -504,24 +504,25 @@ class VirtualizationController extends AbstractController
                     }
                 }
 
-                // XML für Disk-Pfade - robusteres Pattern
-                $xml = libvirt_domain_get_xml_desc($domain, 0);
+                // XML für Disk-Pfade mit korrektem Parameter-Typ
+                $xml = libvirt_domain_get_xml_desc($domain, null);
                 if ($xml) {
-                    preg_match_all('/<disk[^>]+device=[\'"]disk[\'"][^>]*>.*?<source\s+file=[\'"]([^\'""]+)[\'"].*?>/s', $xml, $matches);
-                    $diskPaths = $matches[1] ?? [];
+                    $pattern = '/<disk[^>]+device=[\'"]disk[\'"][^>]*>.*?<source\s+file=[\'"]([^\'""]+)[\'"].*?>/s';
+                    preg_match_all($pattern, $xml, $matches);
 
+                    // Direkte Zuweisung der gefundenen Pfade
+                    $diskPaths = [];
+                    if (!empty($matches[1])) {
+                        $diskPaths = $matches[1];
+                    }
+                
                     foreach ($diskPaths as $path) {
                         try {
-                            // Debug-Logging
-                            error_log("Versuche Volume zu löschen: $path");
-
                             $volume = libvirt_storagevolume_lookup_by_path($this->connection, $path);
-                            if ($volume) {
+                            if (is_resource($volume)) {
                                 if (!libvirt_storagevolume_delete($volume, 0)) {
                                     error_log("Fehler beim Löschen des Volumes: " . libvirt_get_last_error());
                                 }
-                            } else {
-                                error_log("Volume nicht gefunden: " . libvirt_get_last_error());
                             }
                         } catch (\Exception $e) {
                             error_log("Exception beim Volume-Löschen: " . $e->getMessage());
