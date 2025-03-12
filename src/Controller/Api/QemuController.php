@@ -234,7 +234,7 @@ class QemuController extends AbstractController
                 throw new \Exception('Invalid libvirt connection');
             }
             $images = [];
-    
+
             $pools = libvirt_list_storagepools($this->connection);
             if (empty($pools)) {
                 throw new \Exception('Keine Storage Pools gefunden');
@@ -367,17 +367,17 @@ class QemuController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception('Invalid libvirt connection');
             }
-            
+
             $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
             if (!is_resource($pool)) {
                 throw new \Exception('Default storage pool not found');
             }
-            
+
             $poolXml = simplexml_load_string(libvirt_storagepool_get_xml_desc($pool, null));
             if ($poolXml === false) {
                 throw new \Exception('Could not parse storage pool XML');
             }
-            
+
             $targetDir = (string)$poolXml->target->path;
 
             $filename = basename($url);
@@ -412,8 +412,13 @@ class QemuController extends AbstractController
                 throw new \Exception('Download could not be started');
             }
 
-            $pid = trim(file_get_contents($pidFile));
-            if (!$pid || !is_numeric($pid)) {
+            $pidContent = file_get_contents($pidFile);
+            if ($pidContent === false) {
+                throw new \Exception('Could not read PID file');
+            }
+
+            $pid = trim($pidContent);
+            if (empty($pid) || !is_numeric($pid)) {
                 throw new \Exception('Invalid PID generated');
             }
 
@@ -500,17 +505,52 @@ class QemuController extends AbstractController
 
         // Suche alle Status-Dateien
         $files = glob($tempDir . '/*_download_status.json');
+        if ($files === false) {
+            return $this->json([
+                'status' => 'error',
+                'message' => 'Could not search for status files'
+            ], 500);
+        }
 
         foreach ($files as $statusFile) {
-            $status = json_decode(file_get_contents($statusFile), true);
-            if ($status === null) {
-                unlink($statusFile); // Ungültige Status-Datei löschen
+            // Status-Datei einlesen
+            $content = file_get_contents($statusFile);
+            if ($content === false) {
+                unlink($statusFile);
                 continue;
             }
 
-            // Prüfe Download-Status
+            // JSON dekodieren
+            $status = json_decode($content, true);
+            if (!is_array($status)) {
+                unlink($statusFile);
+                continue;
+            }
+
+            // Prüfe ob alle erforderlichen Schlüssel existieren
+            if (!isset($status['status'], $status['data']) || !is_array($status['data'])) {
+                unlink($statusFile);
+                continue;
+            }
+
+            // Download-Status und PID prüfen
             if ($status['status'] === 'downloading' && isset($status['data']['pid'])) {
-                if (!file_exists("/proc/{$status['data']['pid']}")) {
+                // PID validieren und konvertieren
+                $pidValue = $status['data']['pid'];
+                if (!is_numeric($pidValue)) {
+                    unlink($statusFile);
+                    continue;
+                }
+
+                $pid = (int)$pidValue; // Jetzt ist die Konvertierung sicher
+                $procPath = '/proc/' . $pid;
+
+                if (!file_exists($procPath)) {
+                    if (!isset($status['data']['target_path'])) {
+                        unlink($statusFile);
+                        continue;
+                    }
+
                     $targetPath = $status['data']['target_path'];
                     if (file_exists($targetPath)) {
                         // Download erfolgreich
@@ -526,12 +566,11 @@ class QemuController extends AbstractController
                             ]
                         );
 
-                        // Status ein letztes Mal laden und dann aufräumen
-                        $status = json_decode(file_get_contents($statusFile), true);
+                        // Status zur Liste hinzufügen und aufräumen
                         $downloads[] = $status;
-                        unlink($statusFile); // Status-Datei löschen
+                        unlink($statusFile);
 
-                        // Auch Log und PID Dateien aufräumen
+                        // Log und PID Dateien aufräumen
                         if (isset($status['data']['log_file']) && file_exists($status['data']['log_file'])) {
                             unlink($status['data']['log_file']);
                         }
