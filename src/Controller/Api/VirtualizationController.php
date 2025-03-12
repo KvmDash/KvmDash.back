@@ -690,10 +690,10 @@ class VirtualizationController extends AbstractController
 
             // Status der Erstellung zurückgeben
             return $this->json(new VirtualMachineAction(
-                success: $domain !== false,
+                success: is_resource($domain),
                 domain: $data['name'],
                 action: 'create',
-                error: $domain === false ? libvirt_get_last_error() : null
+                error: !is_resource($domain) ? libvirt_get_last_error() : null
             ));
         } catch (\Exception $e) {
             // Aufräumen bei Fehlern
