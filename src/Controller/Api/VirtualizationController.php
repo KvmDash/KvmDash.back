@@ -723,18 +723,26 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
-            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
 
-            if (!$domain) {
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
 
+
             // Basis-Informationen
             $info = libvirt_domain_get_info($domain);
-            $xml = libvirt_domain_get_xml_desc($domain, 0);
+            $xml = libvirt_domain_get_xml_desc($domain, null);
             $xmlObj = simplexml_load_string($xml);
+
+            if ($xmlObj === false) {
+                throw new \Exception($this->translator->trans('error.invalid_domain_xml'));
+            }
 
             // Detaillierte Speicherstatistiken abrufen
             $memoryStats = libvirt_domain_memory_stats($domain);
@@ -839,23 +847,26 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+    
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-
-            if (!$domain) {
+            if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
 
             // XML parsen für SPICE-Port mit xmllint (genauer als SimpleXML)
-            $xml = libvirt_domain_get_xml_desc($domain, 0);
+            $xml = libvirt_domain_get_xml_desc($domain, NULL);
             $tmpFile = tempnam(sys_get_temp_dir(), 'vm_');
             file_put_contents($tmpFile, $xml);
 
             $spicePort = (int)shell_exec("xmllint --xpath 'string(//graphics[@type=\"spice\"]/@port)' " . escapeshellarg($tmpFile));
             unlink($tmpFile);
-
-            if (!$spicePort || $spicePort === 0) {
+            
+            if ($spicePort <= 0) {
                 return $this->json([
                     'error' => $this->translator->trans('error.no_spice_port')
                 ], 404);
