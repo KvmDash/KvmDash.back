@@ -289,30 +289,42 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+    
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-
-            if (!$domain) {
-                return $this->json(['error' => $this->translator->trans('error.libvirt_domain_not_found')], 404);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
             }
-
+    
+            // JSON-Daten validieren
             $data = json_decode($request->getContent(), true);
-            $force = isset($data['force']) && $data['force'] === true;
-
-            $result = false;
-            if ($force) {
-                $result = libvirt_domain_destroy($domain);
-            } else {
-                $result = libvirt_domain_shutdown($domain);
+            if (!is_array($data)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.invalid_json')
+                ], 400);
             }
-
+    
+            $force = isset($data['force']) && $data['force'] === true;
+    
+            // Domain stoppen
+            $result = $force ? 
+                libvirt_domain_destroy($domain) : 
+                libvirt_domain_shutdown($domain);
+    
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
-                action: $force ? $this->translator->trans('libvirt_domain_force_stop') :  $this->translator->trans('libvirt_domain_graceful_stop'),
+                action: $force ? 'force_stop' : 'graceful_stop',
                 error: $result === false ? libvirt_get_last_error() : null
             ));
         } catch (\Exception $e) {
-            return $this->json(['error' => $e->getMessage()], 500);
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
