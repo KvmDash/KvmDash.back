@@ -411,16 +411,19 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+    
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-
-            if (!$domain) {
+            if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-
+    
             $result = libvirt_domain_reboot($domain);
-
+    
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
