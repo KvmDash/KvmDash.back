@@ -595,6 +595,16 @@ class VirtualizationController extends AbstractController
                 throw new \Exception($this->translator->trans('error.invalid_json'));
             }
 
+            // Validiere erforderliche Felder
+            if (!isset($data['name']) || !is_string($data['name'])) {
+                throw new \Exception($this->translator->trans('error.invalid_vm_name'));
+            }
+
+            if (!isset($data['disk_size']) || !is_numeric($data['disk_size'])) {
+                throw new \Exception($this->translator->trans('error.invalid_disk_size'));
+            }
+
+
             // Default Storage Pool holen
             $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
             if (!is_resource($pool)) {
@@ -625,12 +635,17 @@ class VirtualizationController extends AbstractController
             $command = sprintf(
                 'qemu-img create -f qcow2 %s %dG',
                 escapeshellarg($vhdPath),
-                (int)$data['disk_size']
+                (int)($data['disk_size'])
             );
+
             exec($command, $output, $returnVar);
 
             if ($returnVar !== 0) {
-                throw new \Exception($this->translator->trans('error.create_disk_failed'));
+                $errorMessage = $this->translator->trans('error.create_disk_failed');
+                if (!empty($output)) {
+                    $errorMessage .= ': ' . implode(' ', $output);
+                }
+                throw new \Exception($errorMessage);
             }
 
             // Prüfe ob OS-Variant angegeben wurde, ansonsten setze Standard
