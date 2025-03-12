@@ -355,31 +355,37 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+    
             $domains = [];
             $activeDomains = libvirt_list_domains($this->connection);
-
+    
             foreach ($activeDomains as $domainId) {
                 $domain = libvirt_domain_lookup_by_name($this->connection, $domainId);
-                if ($domain) {
-                    $info = libvirt_domain_get_info($domain);
-                    $xml = libvirt_domain_get_xml_desc($domain, 0);
-
-                    // Einfache IP-Adressextraktion
-                    $ip = '';
-                    if ($xml) {
-                        preg_match('/<ip address=\'([^\']+)\'/', $xml, $matches);
-                        $ip = $matches[1] ?? '';
-                    }
-
-                    $domains[$domainId] = [
-                        'state.state' => (string)($info['state'] ?? 0),
-                        'balloon.current' => (string)($info['memory'] ?? 0),
-                        'vcpu.current' => (string)($info['nrVirtCpu'] ?? 0),
-                        'ip' => $ip
-                    ];
+                if (!is_resource($domain)) {
+                    continue;
                 }
+    
+                $info = libvirt_domain_get_info($domain);
+                $xml = libvirt_domain_get_xml_desc($domain, null);
+    
+                // Einfache IP-Adressextraktion
+                $ip = '';
+                if ($xml) {
+                    preg_match('/<ip address=\'([^\']+)\'/', $xml, $matches);
+                    $ip = $matches[1] ?? '';
+                }
+    
+                $domains[$domainId] = [
+                    'state.state' => (string)($info['state'] ?? 0),
+                    'balloon.current' => (string)($info['memory'] ?? 0),
+                    'vcpu.current' => (string)($info['nrVirtCpu'] ?? 0),
+                    'ip' => $ip
+                ];
             }
-
+    
             return $this->json($domains);
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
