@@ -11,7 +11,7 @@ use ApiPlatform\Metadata\Post;
 
 use App\Entity\User;
 use App\Dto\LoginResponse;
-
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 #[ApiResource(
     operations: [
@@ -28,12 +28,17 @@ use App\Dto\LoginResponse;
 
 class LoginController extends AbstractController
 {
+    public function __construct(
+        private readonly TranslatorInterface $translator
+    ){}
+
+
     public function login(#[CurrentUser] ?User $user): JsonResponse
     {
         if (null === $user) {
             return $this->json([
                 'code' => 401,
-                'message' => 'Invalid credentials'
+                'message' => $this->translator->trans('error.invalid_credentials')
             ], JsonResponse::HTTP_UNAUTHORIZED);
         }
 

@@ -47,7 +47,7 @@ error.storage_pools_list_failed: 'Storage Pools konnten nicht aufgelistet werden
 error.iso_delete_failed: 'ISO-Datei konnte nicht gelöscht werden'
 error.iso_file_not_in_pool: 'ISO-Datei in keinem Storage Pool gefunden'
 
-
+error.invalid_credentials: 'Ungültige Anmeldedaten'
 
 libvirt_domain_force_stop: 'Erzwungener Stopp'
 libvirt_domain_graceful_stop: 'Regulärer Stopp'
