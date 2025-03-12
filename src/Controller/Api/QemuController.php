@@ -67,8 +67,14 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  */
 class QemuController extends AbstractController
 {
-    private $connection;
-    private $translator;
+    /** 
+     * Die libvirt Verbindungsressource
+     * @var resource|null 
+     */
+
+    private $connection = null;
+    private TranslatorInterface $translator;
+
 
     public function __construct(TranslatorInterface $translator)
     {
@@ -91,11 +97,12 @@ class QemuController extends AbstractController
      */
     private function connect(): void
     {
-        if (!$this->connection) {
-            $this->connection = libvirt_connect('qemu:///system', false);
-            if (!$this->connection) {
+        if ($this->connection === null) {
+            $result = libvirt_connect('qemu:///system', false, []);
+            if (!is_resource($result)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed') . \libvirt_get_last_error());
             }
+            $this->connection = $result;
         }
     }
 
