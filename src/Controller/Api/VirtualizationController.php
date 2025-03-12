@@ -461,33 +461,48 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+    
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-
-            if (!$domain) {
+            if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-
-            // Prüfe ob VHD-Dateien auch gelöscht werden sollen
+    
+            // JSON-Daten validieren
             $data = json_decode($request->getContent(), true);
+            if (!is_array($data)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.invalid_json')
+                ], 400);
+            }
+    
             $deleteVhd = isset($data['deleteVhd']) && $data['deleteVhd'] === true;
+    
 
             if ($deleteVhd) {
                 // Alle Storage Pools durchsuchen
                 $pools = libvirt_list_storagepools($this->connection);
-                if ($pools === false) {
-                    error_log("Fehler beim Auflisten der Storage Pools: " . libvirt_get_last_error());
+                if (empty($pools)) {
+                    error_log("Keine Storage Pools gefunden");
                 } else {
                     foreach ($pools as $poolName) {
+                        if (!is_string($poolName)) {
+                            error_log("Ungültiger Pool-Name übersprungen");
+                            continue;
+                        }
+            
                         $pool = libvirt_storagepool_lookup_by_name($this->connection, $poolName);
-                        if ($pool) {
-                            // Pool aktualisieren um neue/gelöschte Volumes zu erkennen
+                        if (is_resource($pool)) {
                             libvirt_storagepool_refresh($pool);
+                        } else {
+                            error_log("Konnte Pool nicht öffnen: " . libvirt_get_last_error());
                         }
                     }
                 }
-
 
                 // XML für Disk-Pfade - robusteres Pattern
                 $xml = libvirt_domain_get_xml_desc($domain, 0);
