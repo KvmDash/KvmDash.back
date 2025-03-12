@@ -6,8 +6,8 @@ $results = [];
 function findHardcodedStrings($file) {
     $content = file_get_contents($file);
     $findings = [];
+    $lines = explode("\n", $content);
 
-    // Erweiterte Patterns für verschiedene Fehlermeldungs-Formate
     $patterns = [
         'exceptions' => [
             '/throw new \\\\Exception\([\'"](.+?)[\'"]\)/',
@@ -25,13 +25,13 @@ function findHardcodedStrings($file) {
 
     foreach ($patterns as $type => $typePatterns) {
         foreach ($typePatterns as $pattern) {
-            if (preg_match_all($pattern, $content, $matches)) {
-                foreach ($matches[1] as $match) {
-                    // Ignoriere Strings, die bereits $this->translator->trans verwenden
-                    if (!strpos($content, '$this->translator->trans(\'' . $match . '\')')) {
+            foreach ($lines as $lineNumber => $line) {
+                if (preg_match($pattern, $line, $matches)) {
+                    if (!strpos($line, '$this->translator->trans')) {
                         $findings[] = [
                             'type' => $type,
-                            'string' => $match
+                            'string' => $matches[1],
+                            'line' => $lineNumber + 1
                         ];
                     }
                 }
@@ -63,7 +63,8 @@ foreach ($results as $file => $findings) {
     echo "\nDatei: $file\n";
     foreach ($findings as $finding) {
         echo sprintf(
-            "- %s: '%s'\n",
+            "- Zeile %d - %s: '%s'\n",
+            $finding['line'],
             str_pad($finding['type'], 12),
             $finding['string']
         );

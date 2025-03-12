@@ -14,6 +14,7 @@ use App\Dto\HostCpuInfo;
 use App\Dto\HostMemInfo;
 use App\Dto\HostDiskInfo;
 
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 #[ApiResource(
     operations: [
@@ -52,6 +53,11 @@ use App\Dto\HostDiskInfo;
 
 class HostController extends AbstractController
 {
+
+    public function __construct(
+        private readonly TranslatorInterface $translator
+    ) {}
+
     /**
      * Holt Systeminformationen via hostnamectl
      * Gibt grundlegende Systeminformationen wie Hostname, Betriebssystem und Hardware zurück
@@ -170,7 +176,7 @@ class HostController extends AbstractController
             
         } catch (\Exception $e) {
             return new JsonResponse([
-                'error' => 'Failed to fetch CPU information',
+                'error' => $this->translator->trans('error.cpu_info'),
                 'message' => $e->getMessage()
             ], 500);
         }

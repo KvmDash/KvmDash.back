@@ -5,6 +5,12 @@ error.no_command_specified: 'Kein Befehl angegeben'
 error.command_not_allowed: 'Unerlaubter Befehl'
 error.invalid_email: 'Ungültige Email-Adresse'
 
+# host monitoring
+error.proc_stat_read: 'Fehler beim Lesen von /proc/stat'
+error.cpu_times_retrieval: 'CPU-Zeiten konnten nicht ermittelt werden'
+error.memory_parse: 'Arbeitsspeicher-Informationen konnten nicht ausgelesen werden'
+error.header_parse: 'Header konnten nicht verarbeitet werden'
+error.cpu_info: 'CPU-Informationen konnten nicht abgerufen werden'
 
 # libvirt
 error.libvirt_not_installed: 'Libvirt ist nicht installiert'
