@@ -611,7 +611,7 @@ class QemuController extends AbstractController
      * @param string $statusFile Pfad zur Status-Datei (z.B. /tmp/debian-12_download_status.json)
      * @param string $status     Aktueller Status ('downloading', 'completed', 'failed')
      * @param string $message    Optionale Statusmeldung (default: '')
-     * @param array  $data       Zusätzliche Daten wie PID, URLs, Pfade (default: [])
+     * @param array<string,mixed> $data Zusätzliche Daten wie PID, URLs, Pfade
      * 
      * Status-Datei Format:
      * {
@@ -668,9 +668,12 @@ class QemuController extends AbstractController
     {
         try {
             $data = json_decode($request->getContent(), true);
+            if (!is_array($data)) {
+                throw new \Exception('Invalid JSON data');
+            }
 
-            if (!isset($data['path'])) {
-                throw new \Exception('Path is required');
+            if (!isset($data['path']) || !is_string($data['path'])) {
+                throw new \Exception('Path is required and must be a string');
             }
 
             $path = $data['path'];
@@ -686,14 +689,20 @@ class QemuController extends AbstractController
             }
 
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception('Invalid libvirt connection');
+            }
 
             // Finde den Pool und Volume für die Datei
             $pools = libvirt_list_storagepools($this->connection);
-            $volumeFound = false;
+            if (empty($pools)) {
+                throw new \Exception('Could not list storage pools');
+            }
 
+            $volumeFound = false;
             foreach ($pools as $poolName) {
                 $pool = libvirt_storagepool_lookup_by_name($this->connection, $poolName);
-                if (!$pool) {
+                if (!is_resource($pool)) {
                     continue;
                 }
 
@@ -703,11 +712,11 @@ class QemuController extends AbstractController
                 if ($volumes) {
                     foreach ($volumes as $volumeName) {
                         $volume = libvirt_storagevolume_lookup_by_name($pool, $volumeName);
-                        if (!$volume) {
+                        if (!is_resource($volume)) {
                             continue;
                         }
 
-                        $xml = libvirt_storagevolume_get_xml_desc($volume, 0);
+                        $xml = libvirt_storagevolume_get_xml_desc($volume, NULL);
                         $volumeXml = simplexml_load_string($xml);
 
                         if ($volumeXml && (string)$volumeXml->target->path === $path) {
