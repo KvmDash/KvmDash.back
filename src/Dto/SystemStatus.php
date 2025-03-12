@@ -2,6 +2,8 @@
 
 namespace App\Dto;
 
+use DateTime;
+
 /**
  * Repräsentiert den aktuellen Systemstatus des Servers.
  * Diese DTO-Klasse speichert Informationen über CPU, Speicher und Festplattenauslastung.
