@@ -5,7 +5,7 @@ namespace App\Entity;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
-
+use Symfony\Contracts\Translation\TranslatorInterface;
 /**
  * User Entity
  * 
@@ -19,6 +19,15 @@ use Symfony\Component\Security\Core\User\UserInterface;
 #[ORM\Entity]
 class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
+
+    private ?TranslatorInterface $translator = null;
+
+    // Setter für den Translator
+    public function setTranslator(TranslatorInterface $translator): void 
+    {
+        $this->translator = $translator;
+    }
+
     /**
      * Die eindeutige ID des Benutzers
      * 
@@ -182,7 +191,7 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     {
         $email = trim($this->email ?? '');
         if ($email === '') {
-            throw new \RuntimeException('Ungültige Email-Adresse');
+            $this->translator?->trans('error.invalid_email') ?? 'error.invalid_email';
         }
 
         return $email;

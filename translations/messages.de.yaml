@@ -1,8 +1,9 @@
 # translations/messages.de.yaml
 
 # general
-error.no_command_specified: Kein Befehl angegeben
+error.no_command_specified: 'Kein Befehl angegeben'
 error.command_not_allowed: 'Unerlaubter Befehl'
+error.invalid_email: 'Ungültige Email-Adresse'
 
 
 # libvirt
