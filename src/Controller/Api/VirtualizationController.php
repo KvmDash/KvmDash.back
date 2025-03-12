@@ -487,11 +487,11 @@ class VirtualizationController extends AbstractController
                 // Alle Storage Pools durchsuchen
                 $pools = libvirt_list_storagepools($this->connection);
                 if (empty($pools)) {
-                    error_log("Keine Storage Pools gefunden");
+                    error_log($this->translator->trans('error.no_storage_pools'));
                 } else {
                     foreach ($pools as $poolName) {
                         if (!is_string($poolName)) {
-                            error_log("Ungültiger Pool-Name übersprungen");
+                            error_log($this->translator->trans('error.invalid_pool_name'));
                             continue;
                         }
 
@@ -892,7 +892,7 @@ class VirtualizationController extends AbstractController
                 sleep(1);
                 exec($checkCmd, $output, $returnVar);
                 if ($returnVar !== 0) {
-                    throw new \Exception('Websockify konnte nicht gestartet werden');
+                    throw new \Exception($this->translator->trans('error.websockify_failed'));
                 }
             }
 
