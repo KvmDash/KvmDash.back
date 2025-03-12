@@ -433,7 +433,7 @@ class QemuController extends AbstractController
 
             return $this->json([
                 'status' => 'success',
-                'message' => 'Download started',
+                'message' => $this->translator->trans('success.download_started'),
                 'data' => [
                     'pid' => (int)$pid,
                     'log_file' => $logFile
@@ -508,7 +508,7 @@ class QemuController extends AbstractController
         if ($files === false) {
             return $this->json([
                 'status' => 'error',
-                'message' => 'Could not search for status files'
+                'message' => $this->translator->trans('error.status_files_search_failed')
             ], 500);
         }
 
@@ -737,7 +737,7 @@ class QemuController extends AbstractController
 
             return $this->json([
                 'status' => 'success',
-                'message' => 'ISO successfully deleted'
+                'message' => $this->translator->trans('success.iso_deleted')
             ]);
         } catch (\Exception $e) {
             return $this->json([
