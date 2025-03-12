@@ -3,19 +3,16 @@
 namespace App\Dto;
 
 /**
- * DTO (Data Transfer Object) für die Login-Antwort
- * 
- * Diese Klasse kapselt die Daten, die nach einem erfolgreichen Login
- * an den Client zurückgegeben werden. Sie enthält die Benutzeridentifikation
- * und die zugewiesenen Rollen.
+ * Repräsentiert die Antwort nach einem Login-Versuch.
+ * Diese DTO-Klasse speichert die Benutzeridentifikation und zugewiesene Rollen.
  */
 class LoginResponse
 {
     /**
-     * Erstellt eine neue LoginResponse-Instanz
+     * Erstellt eine neue LoginResponse-Instanz.
      * 
-     * @param string $user Die Benutzerkennung (typischerweise die E-Mail-Adresse)
-     * @param array<int,string> $roles Array von Benutzer-Rollen (z.B. 'ROLE_USER', 'ROLE_ADMIN')
+     * @param string $user Eindeutige Benutzerkennung des eingeloggten Users
+     * @param array<int,string> $roles Liste der dem Benutzer zugewiesenen Rollen
      */
     public function __construct(
         public readonly string $user,
