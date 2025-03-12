@@ -121,14 +121,17 @@ class QemuController extends AbstractController
     {
         try {
             $this->connect();
-            $networks = [];
+            if (!is_resource($this->connection)) {
+                throw new \Exception('Invalid libvirt connection');
+            }
 
             // Libvirt Netzwerke abfragen
+            $networks = [];
             $virtNetworks = libvirt_list_networks($this->connection);
             if ($virtNetworks) {
                 foreach ($virtNetworks as $network) {
                     $netResource = libvirt_network_get($this->connection, $network);
-                    if ($netResource) {
+                    if (is_resource($netResource)) {
                         $networks[] = [
                             'name' => $network === 'default' ? 'NAT (default)' : $network,
                             'type' => $network === 'default' ? 'nat' : 'bridge',
@@ -227,17 +230,20 @@ class QemuController extends AbstractController
     {
         try {
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception('Invalid libvirt connection');
+            }
             $images = [];
-
+    
             $pools = libvirt_list_storagepools($this->connection);
-            if (!$pools) {
+            if (empty($pools)) {
                 throw new \Exception('Keine Storage Pools gefunden');
             }
 
             foreach ($pools as $poolName) {
                 try {
                     $pool = libvirt_storagepool_lookup_by_name($this->connection, $poolName);
-                    if (!$pool) {
+                    if (!is_resource($pool)) {
                         continue;
                     }
 
@@ -251,11 +257,11 @@ class QemuController extends AbstractController
                             }
 
                             $volume = libvirt_storagevolume_lookup_by_name($pool, $volumeName);
-                            if (!$volume) {
+                            if (!is_resource($volume)) {
                                 continue;
                             }
 
-                            $xml = libvirt_storagevolume_get_xml_desc($volume, 0);
+                            $xml = libvirt_storagevolume_get_xml_desc($volume, NULL);
                             $volumeXml = simplexml_load_string($xml);
 
                             if ($volumeXml) {
