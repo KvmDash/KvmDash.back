@@ -21,28 +21,28 @@ use Symfony\Contracts\Translation\TranslatorInterface;
         new Get(
             name: 'api_host_info',
             uriTemplate: '/host/info',
-            controller: self::class.'::getSystemInfo',
+            controller: self::class . '::getSystemInfo',
             output: HostInfo::class,
             read: false
         ),
         new Get(
             name: 'api_cpu_info',
             uriTemplate: '/host/cpu',
-            controller: self::class.'::getCpuInfo',
+            controller: self::class . '::getCpuInfo',
             output: HostCpuInfo::class,
             read: false
         ),
         new Get(
             name: 'api_mem_info',
             uriTemplate: '/host/mem',
-            controller: self::class.'::getMemInfo',
+            controller: self::class . '::getMemInfo',
             output: HostMemInfo::class,
             read: false
         ),
         new Get(
             name: 'api_disk_info',
             uriTemplate: '/host/disk',
-            controller: self::class.'::getDiskInfo',
+            controller: self::class . '::getDiskInfo',
             output: HostDiskInfo::class,
             read: false
         )
@@ -68,14 +68,14 @@ class HostController extends AbstractController
             // System-Informationen via hostnamectl
             $process = new Process(['hostnamectl', 'status', '--json=pretty']);
             $process->run();
-            
+
             if (!$process->isSuccessful()) {
                 throw new \RuntimeException($process->getErrorOutput());
             }
-            
+
             /** @var array<string,string> $systemInfo */
             $systemInfo = json_decode($process->getOutput(), true) ?? [];
-            
+
             return new JsonResponse([
                 'Hostname' => $systemInfo['StaticHostname'] ?? 'Unknown',
                 'OperatingSystemPrettyName' => $systemInfo['OperatingSystemPrettyName'] ?? 'Unknown',
@@ -84,10 +84,9 @@ class HostController extends AbstractController
                 'HardwareVendor' => $systemInfo['HardwareVendor'] ?? 'Unknown',
                 'HardwareModel' => $systemInfo['HardwareModel'] ?? 'Unknown'
             ]);
-            
         } catch (\Exception $e) {
             return new JsonResponse([
-                'error' => 'Failed to fetch system information',
+                'error' => $this->translator->trans('error.system_info'),
                 'message' => $e->getMessage()
             ], 500);
         }
@@ -112,7 +111,7 @@ class HostController extends AbstractController
     {
         $statContent = @file_get_contents('/proc/stat');
         if ($statContent === false) {
-            throw new \RuntimeException('Failed to read /proc/stat');
+            throw new \RuntimeException($this->translator->trans('error.proc_stat_read'));
         }
 
         $lines = explode("\n", $statContent);
@@ -151,7 +150,7 @@ class HostController extends AbstractController
             $cpuTimes2 = $this->getCpuTimes();
 
             if (empty($cpuTimes1) || empty($cpuTimes2)) {
-                throw new \RuntimeException('Failed to retrieve CPU times');
+                throw new \RuntimeException($this->translator->trans('error.cpu_times_retrieval'));
             }
 
             $cpuData = [];
@@ -173,7 +172,6 @@ class HostController extends AbstractController
             }
 
             return new JsonResponse($cpuData);
-            
         } catch (\Exception $e) {
             return new JsonResponse([
                 'error' => $this->translator->trans('error.cpu_info'),
@@ -193,18 +191,18 @@ class HostController extends AbstractController
             // Benutze -b für Bytes statt human-readable Format
             $process = new Process(['env', 'LANG=C', 'free', '-b']);
             $process->run();
-            
+
             if (!$process->isSuccessful()) {
                 throw new \RuntimeException($process->getErrorOutput());
             }
-            
+
             $output = $process->getOutput();
-            
+
             // Vereinfachtes Pattern für das Standard-Format von free
             if (preg_match('/^Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $output, $matches)) {
                 // Konvertiere Bytes in GB für bessere Lesbarkeit
                 $toGB = fn($bytes) => round($bytes / (1024 * 1024 * 1024), 2) . 'G';
-                
+
                 return new JsonResponse([
                     'total' => $toGB((int)$matches[1]),
                     'used' => $toGB((int)$matches[2]),
@@ -214,12 +212,11 @@ class HostController extends AbstractController
                     'available' => $toGB((int)$matches[6])
                 ]);
             }
-            
-            throw new \RuntimeException('Unable to parse memory output');
-            
+
+            throw new \RuntimeException($this->translator->trans('error.memory_parse'));
         } catch (\Exception $e) {
             return new JsonResponse([
-                'error' => 'Failed to fetch memory information',
+                'error' => $this->translator->trans('error.memory_info'),
                 'message' => $e->getMessage()
             ], 500);
         }
@@ -236,34 +233,34 @@ class HostController extends AbstractController
             // Benutze df ohne temporäre Filesysteme
             $process = new Process(['df', '-h', '-x', 'devtmpfs', '-x', 'tmpfs']);
             $process->run();
-            
+
             if (!$process->isSuccessful()) {
                 throw new \RuntimeException($process->getErrorOutput());
             }
-            
+
             $output = $process->getOutput();
             $lines = explode("\n", trim($output));
             $headers = preg_split('/\s+/', array_shift($lines));
-            
+
             if ($headers === false) {
-                throw new \RuntimeException('Failed to parse headers');
+                throw new \RuntimeException($this->translator->trans('error.header_parse'));
             }
-            
+
             $result = [];
             foreach ($lines as $line) {
                 if (trim($line) === '') {
                     continue;
                 }
-                
+
                 // Split die Zeile, aber behalte den letzten Teil (Mount-Punkt) intakt
                 $values = preg_split('/\s+/', $line, count($headers) - 1);
                 if ($values === false) {
                     continue;
                 }
-                
+
                 if (count($values) === count($headers) - 1) {
                     $values[] = substr($line, strrpos($line, ' ') + 1);
-                    
+
                     $result[] = [
                         'Filesystem' => $values[0],
                         'Size' => $values[1],
@@ -274,12 +271,11 @@ class HostController extends AbstractController
                     ];
                 }
             }
-            
+
             return new JsonResponse($result);
-            
         } catch (\Exception $e) {
             return new JsonResponse([
-                'error' => 'Failed to fetch disk information',
+                'error' => $this->translator->trans('error.disk_info'),
                 'message' => $e->getMessage()
             ], 500);
         }
