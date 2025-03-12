@@ -102,8 +102,13 @@ use App\Dto\VirtualMachineAction;
  */
 class VirtualizationController extends AbstractController
 {
+    /** 
+     * Die libvirt Verbindungsressource
+     * @var resource|null 
+     */
     private $connection;
-    private $translator;
+
+    private TranslatorInterface $translator;
 
     public function __construct(TranslatorInterface $translator, RequestStack $requestStack)
 
@@ -138,12 +143,14 @@ class VirtualizationController extends AbstractController
      */
     private function connect(): void
     {
-        if (!$this->connection) {
-
+        if (!is_resource($this->connection)) {
             // Mit lokalem Hypervisor verbinden
-            $this->connection = libvirt_connect('qemu:///system', false);
-            if (!$this->connection) {
-                throw new \Exception($this->translator->trans('error.libvirt_connection_failed') . libvirt_get_last_error());
+            $this->connection = libvirt_connect('qemu:///system', false, []);
+            if (!is_resource($this->connection)) {
+                throw new \Exception(
+                    $this->translator->trans('error.libvirt_connection_failed') . 
+                    libvirt_get_last_error()
+                );
             }
         }
     }
@@ -178,27 +185,30 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
-
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+    
             $domains = [];
             $activeDomains = libvirt_list_domains($this->connection);
-
+            
             foreach ($activeDomains as $domainId) {
                 $domain = libvirt_domain_lookup_by_name($this->connection, $domainId);
-
-                if ($domain) {
-                    $info = libvirt_domain_get_info($domain);
-                    $domains[] = new VirtualMachine(
-                        id: $domainId,
-                        name: $domainId,
-                        state: $info['state'] ?? 0,
-                        memory: $info['memory'] ?? 0,
-                        maxMemory: $info['maxMem'] ?? 0,
-                        cpuCount: $info['nrVirtCpu'] ?? 0
-                    );
+                if (!is_resource($domain)) {
+                    continue;
                 }
+    
+                $info = libvirt_domain_get_info($domain);
+                $domains[] = new VirtualMachine(
+                    id: $domainId,
+                    name: $domainId,
+                    state: $info['state'] ?? 0,
+                    memory: $info['memory'] ?? 0,
+                    maxMemory: $info['maxMem'] ?? 0,
+                    cpuCount: $info['nrVirtCpu'] ?? 0
+                );
             }
-
-
+    
             return $this->json(['domains' => $domains]);
         } catch (\Exception $e) {
             return $this->json([
@@ -568,7 +578,7 @@ class VirtualizationController extends AbstractController
 
             // Prüfe ob OS-Variant angegeben wurde, ansonsten setze Standard
             $osVariant = $data['os_variant'] ?? 'generic';
-            
+
             // Wähle die richtige Netzwerkkonfiguration
             $networkOption = '';
             if ($data['network_bridge'] === 'default') {
@@ -576,7 +586,7 @@ class VirtualizationController extends AbstractController
             } else {
                 $networkOption = 'bridge=' . $data['network_bridge'];
             }
-            
+
             $virtInstallCmd = sprintf(
                 'virt-install --connect qemu:///system --name %s --memory %d --vcpus %d --disk path=%s,format=qcow2 --cdrom %s --network %s --graphics spice --video model=vga --noautoconsole --os-variant %s',
                 escapeshellarg($data['name']),
@@ -586,12 +596,12 @@ class VirtualizationController extends AbstractController
                 escapeshellarg($data['iso_image']),
                 escapeshellarg($networkOption),
                 escapeshellarg($osVariant)
-            ); 
+            );
 
 
-            
+
             exec($virtInstallCmd, $virtOutput, $virtReturnVar);
-            
+
             if ($virtReturnVar !== 0) {
                 // Bei Fehler die erstellte Disk löschen
                 if (file_exists($vhdPath)) {
@@ -599,13 +609,13 @@ class VirtualizationController extends AbstractController
                 }
                 throw new \Exception($this->translator->trans('error.create_vm_failed') . ': ' . implode("\n", $virtOutput));
             }
-            
+
             // Warte kurz, damit die VM ordnungsgemäß registriert wird
             sleep(2);
-            
+
             // Domain nach der Erstellung abrufen
             $domain = libvirt_domain_lookup_by_name($this->connection, $data['name']);
-            
+
             // Status der Erstellung zurückgeben
             return $this->json(new VirtualMachineAction(
                 success: $domain !== false,
@@ -656,34 +666,34 @@ class VirtualizationController extends AbstractController
 
             // Detaillierte Speicherstatistiken abrufen
             $memoryStats = libvirt_domain_memory_stats($domain);
-            
+
             // Speicherstatistiken gemäß der virDomainMemoryStatTags:
             // '7' (RSS): Resident Set Size - tatsächlich belegter physischer Speicher
             // '8' (USABLE): Verfügbarer Speicher ohne zu swappen (entspricht "verfügbar" in free)
             // '4' (UNUSED): Vollständig freier Speicher (entspricht "frei" in free)
             // '10' (DISK_CACHES): Disk-Caches, die schnell freigegeben werden können
             // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainMemoryStatStruct
-            
+
             // Tatsächlich benutzter Speicher (RSS)
             $actualMemoryUsage = isset($memoryStats['7']) ? (int)$memoryStats['7'] : $info['memory'];
-            
+
             // Verfügbarer Speicher (USABLE) - entspricht dem "verfügbar"-Wert in free
             $availableMemory = isset($memoryStats['8']) ? (int)$memoryStats['8'] : 0;
-            
+
             // Fallbacks, wenn die Werte nicht verfügbar sind
             if ($availableMemory <= 0) {
                 // Alternative Berechnung, wenn USABLE nicht verfügbar ist
                 $freeMemory = isset($memoryStats['4']) ? (int)$memoryStats['4'] : 0;
                 $diskCaches = isset($memoryStats['10']) ? (int)$memoryStats['10'] : 0;
                 $availableMemory = $freeMemory + $diskCaches;
-                
+
                 // Wenn immer noch 0, dann Differenz aus maxMem und RSS verwenden
                 if ($availableMemory <= 0) {
                     $availableMemory = $info['maxMem'] - $actualMemoryUsage;
                     if ($availableMemory < 0) $availableMemory = 0;
                 }
             }
-            
+
             // Storage Informationen extrahieren
             $disks = [];
             foreach ($xmlObj->devices->disk as $disk) {
@@ -758,34 +768,34 @@ class VirtualizationController extends AbstractController
         try {
             $this->connect();
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-    
+
             if (!$domain) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-    
+
             // XML parsen für SPICE-Port mit xmllint (genauer als SimpleXML)
             $xml = libvirt_domain_get_xml_desc($domain, 0);
             $tmpFile = tempnam(sys_get_temp_dir(), 'vm_');
             file_put_contents($tmpFile, $xml);
-            
+
             $spicePort = (int)shell_exec("xmllint --xpath 'string(//graphics[@type=\"spice\"]/@port)' " . escapeshellarg($tmpFile));
             unlink($tmpFile);
-    
+
             if (!$spicePort || $spicePort === 0) {
                 return $this->json([
                     'error' => $this->translator->trans('error.no_spice_port')
                 ], 404);
             }
-    
+
             // WebSocket Port = SPICE Port + 1000 (wie im Shell-Script)
             $wsPort = $spicePort + 1000;
-    
+
             // Prüfen ob WebSocket bereits läuft
             $checkCmd = "ps aux | grep -v grep | grep 'websockify $wsPort'";
             exec($checkCmd, $output, $returnVar);
-    
+
             if ($returnVar !== 0) {
                 // WebSocket noch nicht aktiv, starten
                 $cmd = sprintf(
@@ -794,7 +804,7 @@ class VirtualizationController extends AbstractController
                     $spicePort
                 );
                 exec($cmd, $output);
-    
+
                 // Kurz warten und prüfen ob der Prozess läuft
                 sleep(1);
                 exec($checkCmd, $output, $returnVar);
@@ -802,13 +812,12 @@ class VirtualizationController extends AbstractController
                     throw new \Exception('Websockify konnte nicht gestartet werden');
                 }
             }
-    
+
             return $this->json([
                 'spicePort' => $spicePort,
                 'wsPort' => $wsPort,
                 'host' => 'localhost'
             ]);
-    
         } catch (\Exception $e) {
             error_log("SPICE Connection Error: " . $e->getMessage());
             return $this->json(['error' => $e->getMessage()], 500);
