@@ -16,10 +16,17 @@ function findHardcodedStrings($file) {
         'error_logs' => [
             '/error_log\([\'"](.+?)[\'"]\)/'
         ],
-        'json_errors' => [
-            '/[\'"]error[\'"]\s*=>\s*[\'"](.+?)[\'"]\)/',
-            '/[\'"]message[\'"]\s*=>\s*[\'"](.+?)[\'"]\)/',
-            '/new JsonResponse\(\[[\'"]error[\'"]\s*=>\s*[\'"](.+?)[\'"]\)/'
+        'messages' => [
+            '/[\'"]message[\'"]\s*=>\s*[\'"](.+?)[\'"]\]?/',     // Optional ] am Ende
+            '/[\'"]message[\'"]\s*=>\s*[\'"](.+?)[\'"]\s*,/',    // Komma am Ende
+            '/[\'"]message[\'"]\s*=>\s*[\'"](.+?)[\'"]\s*\)/',   // Klammer am Ende
+            '/[\'"]message[\'"]\s*=>\s*[\'"](.+?)[\'"]\s*$/'     // Ende der Zeile
+        ],
+        'errors' => [
+            '/[\'"]error[\'"]\s*=>\s*[\'"](.+?)[\'"]\]?/',
+            '/[\'"]error[\'"]\s*=>\s*[\'"](.+?)[\'"]\s*,/',
+            '/[\'"]error[\'"]\s*=>\s*[\'"](.+?)[\'"]\s*\)/',
+            '/[\'"]error[\'"]\s*=>\s*[\'"](.+?)[\'"]\s*$/'
         ]
     ];
 
@@ -27,6 +34,7 @@ function findHardcodedStrings($file) {
         foreach ($typePatterns as $pattern) {
             foreach ($lines as $lineNumber => $line) {
                 if (preg_match($pattern, $line, $matches)) {
+                    // Ignoriere bereits übersetzte Strings
                     if (!strpos($line, '$this->translator->trans')) {
                         $findings[] = [
                             'type' => $type,
