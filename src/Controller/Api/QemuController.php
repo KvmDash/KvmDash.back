@@ -340,9 +340,13 @@ class QemuController extends AbstractController
     public function uploadIso(Request $request): JsonResponse
     {
         try {
-            $data = json_decode($request->getContent(), true);
 
-            if (!isset($data['url'])) {
+            $data = json_decode($request->getContent(), true);
+            if (!is_array($data)) {
+                throw new \Exception('Invalid JSON data');
+            }
+
+            if (!isset($data['url']) || !is_string($data['url'])) {
                 throw new \Exception('URL is required');
             }
 
