@@ -122,7 +122,7 @@ class QemuController extends AbstractController
         try {
             $this->connect();
             if (!is_resource($this->connection)) {
-                throw new \Exception('Invalid libvirt connection');
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
 
             // Libvirt Netzwerke abfragen
@@ -231,13 +231,13 @@ class QemuController extends AbstractController
         try {
             $this->connect();
             if (!is_resource($this->connection)) {
-                throw new \Exception('Invalid libvirt connection');
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
             $images = [];
 
             $pools = libvirt_list_storagepools($this->connection);
             if (empty($pools)) {
-                throw new \Exception('Keine Storage Pools gefunden');
+                throw new \Exception($this->translator->trans('error.no_storage_pools'));
             }
 
             foreach ($pools as $poolName) {
@@ -343,39 +343,39 @@ class QemuController extends AbstractController
 
             $data = json_decode($request->getContent(), true);
             if (!is_array($data)) {
-                throw new \Exception('Invalid JSON data');
+                throw new \Exception($this->translator->trans('error.invalid_json'));
             }
 
             if (!isset($data['url']) || !is_string($data['url'])) {
-                throw new \Exception('URL is required');
+                throw new \Exception($this->translator->trans('error.url_required'));
             }
 
             $url = $data['url'];
 
             // URL Validierung
             if (!filter_var($url, FILTER_VALIDATE_URL)) {
-                throw new \Exception('Invalid URL format');
+                throw new \Exception($this->translator->trans('error.invalid_url_format'));
             }
 
             // Prüfe auf .iso Endung
             if (!str_ends_with(strtolower($url), '.iso')) {
-                throw new \Exception('URL must end with .iso');
+                throw new \Exception($this->translator->trans('error.url_must_be_iso'));
             }
 
             // Hole Storage Pool Info
             $this->connect();
             if (!is_resource($this->connection)) {
-                throw new \Exception('Invalid libvirt connection');
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
 
             $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
             if (!is_resource($pool)) {
-                throw new \Exception('Default storage pool not found');
+                throw new \Exception($this->translator->trans('error.storage_pool_not_found'));
             }
 
             $poolXml = simplexml_load_string(libvirt_storagepool_get_xml_desc($pool, null));
             if ($poolXml === false) {
-                throw new \Exception('Could not parse storage pool XML');
+                throw new \Exception($this->translator->trans('error.storage_pool_xml_invalid'));
             }
 
             $targetDir = (string)$poolXml->target->path;
@@ -385,7 +385,7 @@ class QemuController extends AbstractController
             $targetPath = rtrim($targetDir, '/') . '/' . $filename;
 
             if (file_exists($targetPath)) {
-                throw new \Exception('ISO file already exists');
+                throw new \Exception($this->translator->trans('error.iso_file_exists'));
             }
 
             // Log-Datei und PID-Datei Setup
@@ -409,17 +409,17 @@ class QemuController extends AbstractController
 
             // Prüfe ob PID-File erstellt wurde
             if (!file_exists($pidFile)) {
-                throw new \Exception('Download could not be started');
+                throw new \Exception($this->translator->trans('error.download_failed'));
             }
 
             $pidContent = file_get_contents($pidFile);
             if ($pidContent === false) {
-                throw new \Exception('Could not read PID file');
+                throw new \Exception($this->translator->trans('error.pid_file_read'));
             }
 
             $pid = trim($pidContent);
             if (empty($pid) || !is_numeric($pid)) {
-                throw new \Exception('Invalid PID generated');
+                throw new \Exception($this->translator->trans('error.invalid_pid'));
             }
 
             // Setze initialen Download-Status
@@ -669,34 +669,34 @@ class QemuController extends AbstractController
         try {
             $data = json_decode($request->getContent(), true);
             if (!is_array($data)) {
-                throw new \Exception('Invalid JSON data');
+                throw new \Exception($this->translator->trans('error.invalid_json'));
             }
 
             if (!isset($data['path']) || !is_string($data['path'])) {
-                throw new \Exception('Path is required and must be a string');
+                throw new \Exception($this->translator->trans('error.path_required'));
             }
 
             $path = $data['path'];
 
             // Prüfe ob Datei existiert
             if (!file_exists($path)) {
-                throw new \Exception('ISO file not found');
+                throw new \Exception($this->translator->trans('error.iso_file_not_found'));
             }
 
             // Prüfe ob es sich um eine ISO-Datei handelt
             if (!str_ends_with(strtolower($path), '.iso')) {
-                throw new \Exception('File is not an ISO image');
+                throw new \Exception($this->translator->trans('error.not_iso_file'));
             }
 
             $this->connect();
             if (!is_resource($this->connection)) {
-                throw new \Exception('Invalid libvirt connection');
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
 
             // Finde den Pool und Volume für die Datei
             $pools = libvirt_list_storagepools($this->connection);
             if (empty($pools)) {
-                throw new \Exception('Could not list storage pools');
+                throw new \Exception($this->translator->trans('error.storage_pools_list_failed'));
             }
 
             $volumeFound = false;
@@ -722,7 +722,7 @@ class QemuController extends AbstractController
                         if ($volumeXml && (string)$volumeXml->target->path === $path) {
                             // Volume gefunden, jetzt löschen
                             if (libvirt_storagevolume_delete($volume) === false) {
-                                throw new \Exception('Failed to delete ISO file');
+                                throw new \Exception($this->translator->trans('error.iso_delete_failed'));
                             }
                             $volumeFound = true;
                             break 2;
@@ -732,7 +732,7 @@ class QemuController extends AbstractController
             }
 
             if (!$volumeFound) {
-                throw new \Exception('ISO file not found in any storage pool');
+                throw new \Exception($this->translator->trans('error.iso_file_not_in_pool'));
             }
 
             return $this->json([
