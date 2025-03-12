@@ -233,28 +233,33 @@ class VirtualizationController extends AbstractController
      * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
      */
 
-    public function startDomain(string $name): JsonResponse
-    {
-        try {
-            $this->connect();
-            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
-
-            if (!$domain) {
-                return $this->json(['error' => $this->translator->trans('error.libvirt_domain_not_found')], 404);
-            }
-
-            $result = libvirt_domain_create($domain);
-
-            return $this->json(new VirtualMachineAction(
-                success: $result !== false,
-                domain: $name,
-                action: 'start',
-                error: $result === false ? libvirt_get_last_error() : null
-            ));
-        } catch (\Exception $e) {
-            return $this->json(['error' => $e->getMessage()], 500);
-        }
-    }
+     public function startDomain(string $name): JsonResponse
+     {
+         try {
+             $this->connect();
+             if (!is_resource($this->connection)) {
+                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+             }
+     
+             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+             if (!is_resource($domain)) {
+                 return $this->json([
+                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                 ], 404);
+             }
+     
+             $result = libvirt_domain_create($domain);
+     
+             return $this->json(new VirtualMachineAction(
+                 success: $result !== false,
+                 domain: $name,
+                 action: 'start',
+                 error: $result === false ? libvirt_get_last_error() : null
+             ));
+         } catch (\Exception $e) {
+             return $this->json(['error' => $e->getMessage()], 500);
+         }
+     }
 
     /**
      * Stoppt eine virtuelle Maschine
