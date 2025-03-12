@@ -52,6 +52,10 @@ use App\Dto\HostDiskInfo;
 
 class HostController extends AbstractController
 {
+    /**
+     * Holt Systeminformationen via hostnamectl
+     * Gibt grundlegende Systeminformationen wie Hostname, Betriebssystem und Hardware zurück
+     */
     public function getSystemInfo(): JsonResponse
     {
         try {
@@ -63,7 +67,8 @@ class HostController extends AbstractController
                 throw new \RuntimeException($process->getErrorOutput());
             }
             
-            $systemInfo = json_decode($process->getOutput(), true);
+            /** @var array<string,string> $systemInfo */
+            $systemInfo = json_decode($process->getOutput(), true) ?? [];
             
             return new JsonResponse([
                 'Hostname' => $systemInfo['StaticHostname'] ?? 'Unknown',
@@ -83,7 +88,20 @@ class HostController extends AbstractController
     }
 
 
-    // Cpu
+    /**
+     * Liest CPU-Zeitinformationen aus /proc/stat
+     * @return array<int,array{
+     *   cpu: string,
+     *   user: int,
+     *   nice: int,
+     *   system: int,
+     *   idle: int,
+     *   iowait: int,
+     *   irq: int,
+     *   softirq: int
+     * }>
+     * @throws \RuntimeException wenn /proc/stat nicht lesbar ist
+     */
     private function getCpuTimes(): array
     {
         $statContent = @file_get_contents('/proc/stat');
@@ -97,7 +115,7 @@ class HostController extends AbstractController
         foreach ($lines as $line) {
             if (preg_match('/^cpu/', $line)) {
                 $parts = preg_split('/\s+/', trim($line));
-                if (count($parts) >= 8) {
+                if ($parts !== false && count($parts) >= 8) {
                     $cpuTimes[] = [
                         'cpu' => $parts[0],
                         'user' => (int)$parts[1],
@@ -115,7 +133,10 @@ class HostController extends AbstractController
         return $cpuTimes;
     }
 
-    // Host CPU information
+    /**
+     * Berechnet CPU-Auslastung durch Vergleich zweier Messzeitpunkte
+     * Wartet 100ms zwischen den Messungen für aussagekräftige Werte
+     */
     public function getCpuInfo(): JsonResponse
     {
         try {
@@ -156,7 +177,10 @@ class HostController extends AbstractController
     }
 
 
-    // Memory
+    /**
+     * Liest Speicherinformationen mit dem 'free' Befehl
+     * Gibt Gesamtspeicher, verwendeten Speicher, freien Speicher und Cache-Informationen zurück
+     */
     public function getMemInfo(): JsonResponse
     {
         try {
@@ -195,7 +219,11 @@ class HostController extends AbstractController
         }
     }
 
-    // Disk
+    /**
+     * Ermittelt Festplatteninformationen mit dem 'df' Befehl
+     * Zeigt Dateisysteme, Größe, Verwendung und Einhängepunkte an
+     * Temporäre Dateisysteme werden ausgeschlossen
+     */
     public function getDiskInfo(): JsonResponse
     {
         try {
