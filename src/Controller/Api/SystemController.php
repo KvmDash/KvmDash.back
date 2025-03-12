@@ -39,7 +39,7 @@ use App\Dto\CommandExecution;
 class SystemController extends AbstractController
 {
 
-    private $translator;
+    private TranslatorInterface $translator;
 
     public function __construct(TranslatorInterface $translator, RequestStack $requestStack)
 
@@ -83,18 +83,19 @@ class SystemController extends AbstractController
 
     public function executeCommand(Request $request): JsonResponse
     {
+        // JSON-Daten dekodieren und validieren
         $data = json_decode($request->getContent(), true);
-        $command = $data['command'] ?? null;
-        
-        if (!$command) {
-            return $this->json(['error' =>  $this->translator->trans('error.no_command_specified')], 400);
+        if (!is_array($data)) {
+            return $this->json(['error' => $this->translator->trans('error.invalid_json')], 400);
         }
-        
-        // WICHTIG: Unbedingt Sicherheitsmaßnahmen einbauen!
-        // Das ist nur eine Demonstration und sollte in der Produktion
-        // stark eingeschränkt werden, um Injection-Angriffe zu verhindern
-        
-        // Beispiel für eine sehr einfache Whitelist (besser noch verfeinern!)
+    
+        if (!isset($data['command']) || !is_string($data['command'])) {
+            return $this->json(['error' => $this->translator->trans('error.no_command_specified')], 400);
+        }
+    
+        $command = $data['command'];
+    
+        // Whitelist-Prüfung für erlaubte Befehle
         $allowedCommands = ['uptime', 'hostname', 'date'];
         $commandParts = explode(' ', $command);
         
@@ -105,12 +106,17 @@ class SystemController extends AbstractController
         $process = Process::fromShellCommandline($command);
         $process->run();
         
+        $exitCode = $process->getExitCode();
+        if ($exitCode === null) {
+            $exitCode = -1; // Fallback wenn kein Exit-Code verfügbar
+        }
+        
         return $this->json(new CommandExecution(
             command: $command,
             success: $process->isSuccessful(),
             output: $process->getOutput(),
             error: $process->getErrorOutput(),
-            exitCode: $process->getExitCode()
+            exitCode: $exitCode
         ));
     }
 }
