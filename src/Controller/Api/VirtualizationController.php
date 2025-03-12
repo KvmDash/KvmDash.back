@@ -515,7 +515,7 @@ class VirtualizationController extends AbstractController
                     if (!empty($matches[1])) {
                         $diskPaths = $matches[1];
                     }
-                
+
                     foreach ($diskPaths as $path) {
                         try {
                             $volume = libvirt_storagevolume_lookup_by_path($this->connection, $path);
@@ -586,21 +586,36 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+
             $data = json_decode($request->getContent(), true);
+            if (!is_array($data)) {
+                throw new \Exception($this->translator->trans('error.invalid_json'));
+            }
 
             // Default Storage Pool holen
             $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
-            if (!$pool) {
+            if (!is_resource($pool)) {
                 throw new \Exception($this->translator->trans('error.storage_pool_not_found'));
             }
 
-            // Pool XML parsen für den Basis-Pfad
-            $poolXml = libvirt_storagepool_get_xml_desc($pool, 0);
-            $poolInfo = simplexml_load_string($poolXml);
-            $poolPath = (string)$poolInfo->target->path;
 
-            if (!$poolPath || !is_dir($poolPath)) {
-                throw new \Exception($this->translator->trans('error.storage_pool_path_invalid'));
+            // Pool XML parsen für den Basis-Pfad
+            $poolXml = libvirt_storagepool_get_xml_desc($pool, null);
+            if (!$poolXml) {
+                throw new \Exception($this->translator->trans('error.storage_pool_xml_failed'));
+            }
+
+            $poolInfo = simplexml_load_string($poolXml);
+            if (!$poolInfo) {
+                throw new \Exception($this->translator->trans('error.storage_pool_xml_invalid'));
+            }
+
+            $poolPath = (string)$poolInfo->target->path;
+            if (empty($poolPath)) {
+                throw new \Exception($this->translator->trans('error.storage_pool_path_missing'));
             }
 
             // VHD-Pfad im Pool
