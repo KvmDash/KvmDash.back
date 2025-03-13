@@ -1,0 +1,31 @@
+# Use the front controller as index file
+DirectoryIndex index.php
+
+# Enable the Apache rewrite engine
+RewriteEngine On
+
+# Set base directory
+RewriteBase /
+
+# Redirect trailing slashes
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)/$ /$1 [L,R=301]
+
+# Handle Authorization header
+RewriteCond %{HTTP:Authorization} .+
+RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Send would-be 404 requests to the front controller
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [L]
+
+# CORS Headers für API Platform
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Methods "GET,POST,PUT,DELETE,OPTIONS"
+Header always set Access-Control-Allow-Headers "Origin,Content-Type,Accept,Authorization"
+
+# Cache-Prevention
+Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+Header always set Pragma "no-cache"
+Header always set Expires "0"
