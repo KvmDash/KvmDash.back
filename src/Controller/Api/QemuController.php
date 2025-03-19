@@ -80,6 +80,7 @@ class QemuController extends AbstractController
     {
         $this->translator = $translator;
 
+        // check if libvirt extension is loaded
         if (!extension_loaded('libvirt')) {
             throw new \Exception($this->translator->trans('error.libvirt_not_installed'));
         }

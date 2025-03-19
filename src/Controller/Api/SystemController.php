@@ -39,19 +39,9 @@ use App\Dto\CommandExecution;
 class SystemController extends AbstractController
 {
 
-    private TranslatorInterface $translator;
-
-    public function __construct(TranslatorInterface $translator, RequestStack $requestStack)
-
-    {
-        $this->translator = $translator;
-    
-        $request = $requestStack->getCurrentRequest();
-        if ($request) {
-            $locale = $request->getPreferredLanguage(['en', 'de']) ?? 'de';
-            $request->setLocale($locale);
-        }
-    }
+    public function __construct(
+        private readonly TranslatorInterface $translator
+    ) {}
 
 
     public function getSystemStatus(): JsonResponse

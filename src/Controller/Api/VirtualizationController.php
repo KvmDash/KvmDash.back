@@ -115,13 +115,7 @@ class VirtualizationController extends AbstractController
     {
         $this->translator = $translator;
 
-        $request = $requestStack->getCurrentRequest();
-        if ($request) {
-            $locale = $request->getPreferredLanguage(['en', 'de']) ?? 'de';
-            $request->setLocale($locale);
-        }
-
-
+        // check if libvirt extension is loaded
         if (!extension_loaded('libvirt')) {
             throw new \Exception($this->translator->trans('error.libvirt_not_installed'));
         }
