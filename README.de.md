@@ -71,17 +71,14 @@ openssl pkey -in config/jwt/private.pem -out config/jwt/public.pem -pubout
 ### 5. Datenbank einrichten
 
 ```bash
-# Datenbank erstellen
-php bin/console doctrine:database:create
-
-# Migrationen ausführen
-php bin/console doctrine:migrations:migrate
+# Datenbank-Schema erstellen
+php bin/console doctrine:schema:create
 ```
 
 ### 6. Admin-Benutzer anlegen
 
 ```bash
-php bin/console app:create-user --admin "admin@example.com" "IhrPasswort"
+php bin/console app:create-user "admin@example.com" "IhrPasswort"
 ```
 
 ### 7. Entwicklungs-Server starten
