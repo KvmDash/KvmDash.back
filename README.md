@@ -112,4 +112,4 @@ php bin/console cache:clear --env=prod
 
 ## Note
 
-This backend is required by the KVMDash Frontend. Make sure the CORS settings in `.env.local` are configured correctly.
+This backend is required by the KVMDash Frontend (https://github.com/KvmDash/KvmDash.front). Make sure the CORS settings in `.env.local` are configured correctly.
