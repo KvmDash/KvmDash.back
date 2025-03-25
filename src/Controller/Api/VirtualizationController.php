@@ -109,13 +109,13 @@ class VirtualizationController extends AbstractController
 {
     /** 
      * The libvirt connection resource
-     * @var resource|null 
+     * @var resource
      */
     private $connection;
 
     private TranslatorInterface $translator;
 
-    public function __construct(TranslatorInterface $translator, RequestStack $requestStack)
+    public function __construct(TranslatorInterface $translator)
 
     {
         $this->translator = $translator;
@@ -953,8 +953,11 @@ class VirtualizationController extends AbstractController
     
             // Retrieve snapshots of the domain
             $snapshots = libvirt_list_domain_snapshots($domain);  // <-- Use this function instead
-            if (!is_array($snapshots)) {
-                return $this->json(['snapshots' => []]);
+            if (empty($snapshots)) {
+                return $this->json([
+                    'vm' => $name,
+                    'snapshots' => []
+                ]);
             }
     
             $snapshotList = [];
@@ -966,7 +969,11 @@ class VirtualizationController extends AbstractController
     
                 $xml = libvirt_domain_snapshot_get_xml($snapshot, 0);
                 $xmlObj = simplexml_load_string($xml);
-    
+                if ($xmlObj === false) {
+                    error_log("Failed to parse snapshot XML for: " . $snapshotName);
+                    continue;
+                }
+
                 $snapshotList[] = [
                     'name' => $snapshotName,
                     'creationTime' => (string)$xmlObj->creationTime,
