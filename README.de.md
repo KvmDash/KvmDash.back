@@ -91,6 +91,16 @@ symfony server:start --port=8000
 php -S localhost:8000 -t public/
 ```
 
+### Wichtiger Hinweis zur Entwicklungsumgebung
+
+Der Entwicklungsserver unterstützt keine WebSocket-Verbindungen, die für die SPICE Remote-Konsole benötigt werden. 
+Folgende Funktionen sind nur in der Produktivumgebung mit Apache/Nginx verfügbar:
+- SPICE Remote-Konsole
+- WebSocket-Verbindungen zu VMs
+
+Für die vollständige Funktionalität, insbesondere die Remote-Konsole, ist ein Produktiv-Webserver (Apache/Nginx) 
+mit WebSocket-Unterstützung erforderlich.
+
 ## API-Dokumentation
 
 Die API-Dokumentation ist nach dem Start des Servers verfügbar unter:
