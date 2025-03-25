@@ -876,7 +876,7 @@ class VirtualizationController extends AbstractController
             if ($returnVar !== 0) {
                 // WebSocket noch nicht aktiv, starten
                 $cmd = sprintf(
-                    'nohup websockify %d localhost:%d > /dev/null 2>&1 & echo $!',
+                    'nohup websockify %d 0.0.0.0:%d  > /dev/null 2>&1 & echo $!',
                     $wsPort,
                     $spicePort
                 );
@@ -890,10 +890,12 @@ class VirtualizationController extends AbstractController
                 }
             }
 
+            $serverHost = $_SERVER['SERVER_NAME'] ?? $_SERVER['SERVER_ADDR'] ?? 'localhost';
+
             return $this->json([
                 'spicePort' => $spicePort,
                 'wsPort' => $wsPort,
-                'host' => 'localhost'
+                'host' =>  $serverHost
             ]);
         } catch (\Exception $e) {
             error_log("SPICE Connection Error: " . $e->getMessage());
