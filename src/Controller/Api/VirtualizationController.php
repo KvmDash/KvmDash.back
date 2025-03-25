@@ -36,11 +36,16 @@ use App\Dto\VirtualMachineAction;
             controller: self::class . '::getDomainDetails',
             read: false
         ),
-        // In den ApiResource annotations
         new GetCollection(
             name: 'get_spice_connection',
             uriTemplate: '/virt/domain/{name}/spice',
             controller: self::class . '::getSpiceConnection',
+            read: false
+        ),
+        new GetCollection(
+            name: 'get_domain_snapshots',
+            uriTemplate: '/virt/domain/{name}/snapshots',
+            controller: self::class . '::listDomainSnapshots',
             read: false
         ),
         new Post(
@@ -844,7 +849,7 @@ class VirtualizationController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
-    
+
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             if (!is_resource($domain)) {
                 return $this->json([
@@ -859,7 +864,7 @@ class VirtualizationController extends AbstractController
 
             $spicePort = (int)shell_exec("xmllint --xpath 'string(//graphics[@type=\"spice\"]/@port)' " . escapeshellarg($tmpFile));
             unlink($tmpFile);
-            
+
             if ($spicePort <= 0) {
                 return $this->json([
                     'error' => $this->translator->trans('error.no_spice_port')
@@ -900,6 +905,61 @@ class VirtualizationController extends AbstractController
         } catch (\Exception $e) {
             error_log("SPICE Connection Error: " . $e->getMessage());
             return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+
+
+    /**
+     * Listet alle Snapshots einer VM
+     */
+    public function listDomainSnapshots(string $name): JsonResponse
+    {
+        try {
+            $this->connect();
+            
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+    
+            // Snapshots der Domain abrufen
+            $snapshots = libvirt_list_domain_snapshots($domain);  // <-- Diese Funktion stattdessen
+            if (!is_array($snapshots)) {
+                return $this->json(['snapshots' => []]);
+            }
+    
+            $snapshotList = [];
+            foreach ($snapshots as $snapshotName) {
+                $snapshot = libvirt_domain_snapshot_lookup_by_name($domain, $snapshotName, 0);
+                if (!is_resource($snapshot)) {
+                    continue;
+                }
+    
+                $xml = libvirt_domain_snapshot_get_xml($snapshot, 0);
+                $xmlObj = simplexml_load_string($xml);
+    
+                $snapshotList[] = [
+                    'name' => $snapshotName,
+                    'creationTime' => (string)$xmlObj->creationTime,
+                    'state' => (string)$xmlObj->state,
+                    'description' => (string)$xmlObj->description,
+                    'parent' => isset($xmlObj->parent) ? (string)$xmlObj->parent->name : null
+                ];
+            }
+    
+            return $this->json([
+                'vm' => $name,
+                'snapshots' => $snapshotList
+            ]);
+            
+        } catch (\Exception $e) {
+            error_log("Snapshot list error: " . $e->getMessage());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 }
