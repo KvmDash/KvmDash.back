@@ -89,7 +89,14 @@ use App\Dto\VirtualMachineAction;
             controller: self::class . '::createDomainSnapshot',
             read: false,
             output: VirtualMachineAction::class,
-            input: null 
+            input: null
+        ),
+        new Post(
+            name: 'delete_snapshot',
+            uriTemplate: '/virt/domain/{name}/snapshot/{snapshot}/delete',
+            controller: self::class . '::deleteDomainSnapshot',
+            read: false,
+            output: VirtualMachineAction::class,
         ),
 
     ]
@@ -1023,47 +1030,90 @@ class VirtualizationController extends AbstractController
         try {
             error_log("=== Starting snapshot creation for VM: $name ===");
             $this->connect();
-    
+
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             error_log("Domain lookup result: " . ($domain ? "success" : "failed"));
-            
+
             if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-    
+
             // Parse request data
             $content = $request->getContent();
             error_log("Request content: " . $content);
-            
+
             $data = json_decode($content, true);
             error_log("Parsed data: " . print_r($data, true));
-    
+
             if (!is_array($data) || empty($data['name'])) {
                 return $this->json([
                     'error' => $this->translator->trans('error.invalid_snapshot_name')
                 ], 400);
             }
-    
-    
+
+
             // Create snapshot
             $result = libvirt_domain_snapshot_create($domain, 0);
             error_log("Snapshot creation result: " . ($result ? "success" : "failed"));
             if (!$result) {
                 error_log("Libvirt error: " . libvirt_get_last_error());
             }
-    
+
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
                 action: 'create_snapshot',
                 error: $result === false ? libvirt_get_last_error() : null
             ));
-    
         } catch (\Exception $e) {
             error_log("CRITICAL Snapshot creation error: " . $e->getMessage());
             error_log("Stack trace: " . $e->getTraceAsString());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Deletes a snapshot of a virtual machine
+     *
+     * @param string $name Name of the virtual machine
+     * @param string $snapshot Name of the snapshot to be deleted
+     * @return JsonResponse Status of the delete operation
+     */
+    public function deleteDomainSnapshot(string $name, string $snapshot): JsonResponse
+    {
+        try {
+            $this->connect();
+
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            // Snapshot-Resource holen
+            $snapshotRes = libvirt_domain_snapshot_lookup_by_name($domain, $snapshot, 0);
+            if (!is_resource($snapshotRes)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.snapshot_not_found')
+                ], 404);
+            }
+
+            // Snapshot löschen
+            $result = libvirt_domain_snapshot_delete($snapshotRes);
+
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'delete_snapshot',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+        } catch (\Exception $e) {
+            error_log("Snapshot deletion error: " . $e->getMessage());
             return $this->json([
                 'error' => $e->getMessage()
             ], 500);
