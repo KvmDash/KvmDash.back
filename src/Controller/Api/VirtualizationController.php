@@ -98,6 +98,13 @@ use App\Dto\VirtualMachineAction;
             read: false,
             output: VirtualMachineAction::class,
         ),
+        new Post(
+            name: 'revert_snapshot',
+            uriTemplate: '/virt/domain/{name}/snapshot/{snapshot}/revert',
+            controller: self::class . '::revertDomainSnapshot',
+            read: false,
+            output: VirtualMachineAction::class,
+        ),
 
     ]
 )]
@@ -1114,6 +1121,64 @@ class VirtualizationController extends AbstractController
             ));
         } catch (\Exception $e) {
             error_log("Snapshot deletion error: " . $e->getMessage());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reverts a virtual machine to a specific snapshot
+     *
+     * This method restores the VM to the state of the specified snapshot.
+     * Important notes:
+     * - The VM state (running/stopped) will be restored as it was in the snapshot
+     * - All changes since the snapshot will be lost
+     * - Child snapshots remain intact but might become invalid
+     *
+     * @param string $name Name of the virtual machine
+     * @param string $snapshot Name of the snapshot to revert to
+     * @return JsonResponse Status of the revert operation
+     */
+    public function revertDomainSnapshot(string $name, string $snapshot): JsonResponse
+    {
+        try {
+            $this->connect();
+            error_log("=== Starting snapshot revert for VM: $name to snapshot: $snapshot ===");
+    
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+    
+            // Prüfen ob Snapshot existiert
+            $snapshotRes = libvirt_domain_snapshot_lookup_by_name($domain, $snapshot, 0);
+            if (!is_resource($snapshotRes)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.snapshot_not_found')
+                ], 404);
+            }
+    
+            // Revert ausführen
+            $result = libvirt_domain_snapshot_revert($snapshotRes, 0); 
+            error_log("Revert result: " . ($result ? "success" : "failed"));
+    
+            if (!$result) {
+                error_log("Libvirt error: " . libvirt_get_last_error());
+            }
+    
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'revert_snapshot',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+    
+        } catch (\Exception $e) {
+            error_log("CRITICAL Snapshot revert error: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
             return $this->json([
                 'error' => $e->getMessage()
             ], 500);
