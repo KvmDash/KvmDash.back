@@ -36,11 +36,16 @@ use App\Dto\VirtualMachineAction;
             controller: self::class . '::getDomainDetails',
             read: false
         ),
-        // In den ApiResource annotations
         new GetCollection(
             name: 'get_spice_connection',
             uriTemplate: '/virt/domain/{name}/spice',
             controller: self::class . '::getSpiceConnection',
+            read: false
+        ),
+        new GetCollection(
+            name: 'get_domain_snapshots',
+            uriTemplate: '/virt/domain/{name}/snapshots',
+            controller: self::class . '::listDomainSnapshots',
             read: false
         ),
         new Post(
@@ -78,6 +83,28 @@ use App\Dto\VirtualMachineAction;
             read: false,
             output: VirtualMachineAction::class,
         ),
+        new Post(
+            name: 'create_snapshot',
+            uriTemplate: '/virt/domain/{name}/snapshot/create',
+            controller: self::class . '::createDomainSnapshot',
+            read: false,
+            output: VirtualMachineAction::class,
+            input: null
+        ),
+        new Post(
+            name: 'delete_snapshot',
+            uriTemplate: '/virt/domain/{name}/snapshot/{snapshot}/delete',
+            controller: self::class . '::deleteDomainSnapshot',
+            read: false,
+            output: VirtualMachineAction::class,
+        ),
+        new Post(
+            name: 'revert_snapshot',
+            uriTemplate: '/virt/domain/{name}/snapshot/{snapshot}/revert',
+            controller: self::class . '::revertDomainSnapshot',
+            read: false,
+            output: VirtualMachineAction::class,
+        ),
 
     ]
 )]
@@ -85,32 +112,32 @@ use App\Dto\VirtualMachineAction;
 
 
 /**
- * Controller für die Verwaltung virtueller Maschinen über libvirt
+ * Controller for managing virtual machines via libvirt
  * 
- * Diese Klasse stellt REST-API Endpunkte bereit für:
- * - Auflisten und Status-Abfrage von VMs
- * - Start/Stop/Reboot Operationen
- * - Löschen von VMs inkl. Storage
+ * This class provides REST API endpoints for:
+ * - Listing and status querying of VMs
+ * - Start/Stop/Reboot operations
+ * - Deleting VMs including storage
  *
- * Technische Details:
- * - Nutzt libvirt PHP Extension für QEMU/KVM Zugriff
- * - Kommuniziert mit lokalem Hypervisor (qemu:///system)
- * - Unterstützt UEFI/NVRAM und QEMU Guest Agent
- * - Mehrsprachige Fehlermeldungen (DE/EN)
+ * Technical details:
+ * - Uses libvirt PHP extension for QEMU/KVM access
+ * - Communicates with local hypervisor (qemu:///system)
+ * - Supports UEFI/NVRAM and QEMU Guest Agent
+ * - Multilingual error messages (DE/EN)
  *
  * @package App\Controller\Api
  */
 class VirtualizationController extends AbstractController
 {
     /** 
-     * Die libvirt Verbindungsressource
-     * @var resource|null 
+     * The libvirt connection resource
+     * @var resource
      */
     private $connection;
 
     private TranslatorInterface $translator;
 
-    public function __construct(TranslatorInterface $translator, RequestStack $requestStack)
+    public function __construct(TranslatorInterface $translator)
 
     {
         $this->translator = $translator;
@@ -122,23 +149,23 @@ class VirtualizationController extends AbstractController
     }
 
     /**
-     * Stellt eine Verbindung zum lokalen QEMU/KVM Hypervisor her
+     * Establishes a connection to the local QEMU/KVM hypervisor
      * 
-     * Diese private Methode wird von allen API-Endpunkten verwendet, um:
-     * - Eine Verbindung zum Hypervisor herzustellen falls noch keine existiert
-     * - Die Verbindung wiederzuverwenden wenn sie bereits besteht
-     * - Die korrekte URI für den lokalen QEMU-Hypervisor zu verwenden
+     * This private method is used by all API endpoints to:
+     * - Establish a connection to the hypervisor if none exists
+     * - Reuse the connection if it already exists
+     * - Use the correct URI for the local QEMU hypervisor
      *
-     * Verbindungsdetails:Im Virt
-     * - URI: 'qemu:///system' für den System-Mode
-     * - Authentifizierung: Über System-Berechtigungen
+     * Connection details:
+     * - URI: 'qemu:///system' for system mode
+     * - Authentication: Via system permissions
      * 
-     * @throws \Exception wenn die Verbindung nicht hergestellt werden kann
+     * @throws \Exception if the connection cannot be established
      */
     private function connect(): void
     {
         if (!is_resource($this->connection)) {
-            // Mit lokalem Hypervisor verbinden
+            // Connect to local hypervisor
             $this->connection = libvirt_connect('qemu:///system', false, []);
             if (!is_resource($this->connection)) {
                 throw new \Exception(
@@ -150,30 +177,30 @@ class VirtualizationController extends AbstractController
     }
 
     /**
-     * Listet alle verfügbaren virtuellen Maschinen auf
+     * Lists all available virtual machines
      * 
-     * Diese Methode liefert eine Liste aller definierten VMs mit Basis-Informationen:
-     * - ID und Name der VM
-     * - Aktueller Status (running, stopped, etc.)
-     * - Zugewiesener und maximaler RAM
-     * - Anzahl virtueller CPUs
+     * This method returns a list of all defined VMs with basic information:
+     * - ID and name of the VM
+     * - Current status (running, stopped, etc.)
+     * - Assigned and maximum RAM
+     * - Number of virtual CPUs
      *
-     * Das Format der Rückgabe ist für die Sidebar optimiert:
+     * The format of the response is optimized for the sidebar:
      * {
      *   "domains": [
      *     {
      *       "id": "vm-1",
      *       "name": "vm-1", 
      *       "state": 1,         // 1=running, 5=stopped
-     *       "memory": 4194304,  // Aktueller RAM in KB
-     *       "maxMemory": 8388608, // Maximaler RAM in KB
+     *       "memory": 4194304,  // Current RAM in KB
+     *       "maxMemory": 8388608, // Maximum RAM in KB
      *       "cpuCount": 2
      *     }
      *   ]
      * }
      * 
-     * @return JsonResponse Liste aller VMs mit Basis-Informationen
-     * @throws \Exception Bei Verbindungsproblemen zum Hypervisor
+     * @return JsonResponse List of all VMs with basic information
+     * @throws \Exception In case of connection problems to the hypervisor
      */
     public function listDomains(): JsonResponse
     {
@@ -212,19 +239,19 @@ class VirtualizationController extends AbstractController
     }
 
     /**
-     * Startet eine virtuelle Maschine
+     * Starts a virtual machine
      *
-     * Diese Methode startet eine VM, die sich im gestoppten Zustand befindet.
-     * Der Start erfolgt ohne Parameter und entspricht einem normalen Bootvorgang.
+     * This method starts a VM that is in a stopped state.
+     * The start is performed without parameters and corresponds to a normal boot process.
      *
-     * Wichtige Hinweise:
-     * - Die VM muss definiert und nicht bereits laufend sein
-     * - Ausreichend Systemressourcen müssen verfügbar sein
-     * - QEMU Guest Agent startet erst nach vollständigem Boot
+     * Important notes:
+     * - The VM must be defined and not already running
+     * - Sufficient system resources must be available
+     * - QEMU Guest Agent starts only after full boot
      *
-     * @param string $name Name der virtuellen Maschine
-     * @return JsonResponse Status der Start-Operation
-     * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
+     * @param string $name Name of the virtual machine
+     * @return JsonResponse Status of the start operation
+     * @throws \Exception In case of connection problems or if the domain is not found
      */
 
     public function startDomain(string $name): JsonResponse
@@ -256,28 +283,28 @@ class VirtualizationController extends AbstractController
     }
 
     /**
-     * Stoppt eine virtuelle Maschine
+     * Stops a virtual machine
      * 
-     * Diese Methode unterstützt zwei Stop-Modi:
-     * 1. Graceful Shutdown (Standard)
-     *    - Sendet ACPI-Signal zum Herunterfahren
-     *    - Erlaubt sauberes Beenden von Diensten
-     *    - VM kann Shutdown verweigern
+     * This method supports two stop modes:
+     * 1. Graceful Shutdown (default)
+     *    - Sends ACPI signal to shut down
+     *    - Allows clean shutdown of services
+     *    - VM can refuse shutdown
      * 
-     * 2. Force Stop (wenn force=true)
-     *    - Sofortiges Beenden der VM
-     *    - Vergleichbar mit Stromkabel ziehen
-     *    - Kann zu Datenverlust führen
+     * 2. Force Stop (if force=true)
+     *    - Immediate stop of the VM
+     *    - Comparable to pulling the power plug
+     *    - Can lead to data loss
      * 
-     * Request-Body Format:
+     * Request body format:
      * {
      *   "force": true|false  // Optional, default false
      * }
      * 
-     * @param string $name Name der virtuellen Maschine
-     * @param Request $request HTTP-Request mit force-Option
-     * @return JsonResponse Status der Stop-Operation
-     * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
+     * @param string $name Name of the virtual machine
+     * @param Request $request HTTP request with force option
+     * @return JsonResponse Status of the stop operation
+     * @throws \Exception In case of connection problems or if the domain is not found
      */
     public function stopDomain(string $name, Request $request): JsonResponse
     {
@@ -294,7 +321,7 @@ class VirtualizationController extends AbstractController
                 ], 404);
             }
 
-            // JSON-Daten validieren
+            // Validate JSON data
             $data = json_decode($request->getContent(), true);
             if (!is_array($data)) {
                 return $this->json([
@@ -304,7 +331,7 @@ class VirtualizationController extends AbstractController
 
             $force = isset($data['force']) && $data['force'] === true;
 
-            // Domain stoppen
+            // Stop domain
             $result = $force ?
                 libvirt_domain_destroy($domain) :
                 libvirt_domain_shutdown($domain);
@@ -324,26 +351,26 @@ class VirtualizationController extends AbstractController
 
 
     /**
-     * Holt den aktuellen Status aller virtuellen Maschinen
+     * Retrieves the current status of all virtual machines
      * 
-     * Diese Methode liefert detaillierte Statusinformationen für alle VMs:
-     * - Aktueller Zustand (running, stopped, etc.)
-     * - Zugewiesener RAM (balloon)
-     * - Anzahl virtueller CPUs
-     * - IP-Adresse (falls verfügbar via QEMU Guest Agent)
+     * This method returns detailed status information for all VMs:
+     * - Current state (running, stopped, etc.)
+     * - Assigned RAM (balloon)
+     * - Number of virtual CPUs
+     * - IP address (if available via QEMU Guest Agent)
      *
-     * Das Format der Rückgabe ist für das Frontend optimiert:
+     * The format of the response is optimized for the frontend:
      * {
      *   "vm-name": {
      *     "state.state": "1",        // 1=running, 5=stopped
      *     "balloon.current": "4096",  // RAM in KB
-     *     "vcpu.current": "2",       // Anzahl vCPUs
-     *     "ip": "192.168.1.100"      // IP oder leer
+     *     "vcpu.current": "2",       // Number of vCPUs
+     *     "ip": "192.168.1.100"      // IP or empty
      *   }
      * }
      * 
-     * @return JsonResponse Status aller VMs als assoziatives Array
-     * @throws \Exception Bei Verbindungsproblemen zum Hypervisor
+     * @return JsonResponse Status of all VMs as an associative array
+     * @throws \Exception In case of connection problems to the hypervisor
      */
     public function getDomainStatus(): JsonResponse
     {
@@ -365,7 +392,7 @@ class VirtualizationController extends AbstractController
                 $info = libvirt_domain_get_info($domain);
                 $xml = libvirt_domain_get_xml_desc($domain, null);
 
-                // Einfache IP-Adressextraktion
+                // Simple IP extraction
                 $ip = '';
                 if ($xml) {
                     preg_match('/<ip address=\'([^\']+)\'/', $xml, $matches);
@@ -387,19 +414,19 @@ class VirtualizationController extends AbstractController
     }
 
     /**
-     * Führt einen Neustart der virtuellen Maschine durch
+     * Reboots the virtual machine
      * 
-     * Der Reboot wird über das ACPI-Signal eingeleitet, was einem "sauberen" Neustart entspricht.
-     * Dies ermöglicht dem Betriebssystem, alle Dienste ordnungsgemäß herunterzufahren.
+     * The reboot is initiated via the ACPI signal, which corresponds to a "clean" reboot.
+     * This allows the operating system to properly shut down all services.
      * 
-     * Wichtige Hinweise:
-     * - Benötigt ein funktionierendes ACPI in der VM
-     * - Das Betriebssystem muss ACPI-Signale verarbeiten können
-     * - Bei fehlgeschlagenem Reboot bleibt die VM im aktuellen Zustand
+     * Important notes:
+     * - Requires a functioning ACPI in the VM
+     * - The operating system must be able to process ACPI signals
+     * - If the reboot fails, the VM remains in its current state
      * 
-     * @param string $name Name der virtuellen Maschine
-     * @return JsonResponse Status der Reboot-Operation
-     * @throws \Exception Bei Verbindungsproblemen oder wenn die Domain nicht gefunden wird
+     * @param string $name Name of the virtual machine
+     * @return JsonResponse Status of the reboot operation
+     * @throws \Exception In case of connection problems or if the domain is not found
      */
     public function rebootDomain(string $name): JsonResponse
     {
@@ -431,25 +458,25 @@ class VirtualizationController extends AbstractController
 
 
     /**
-     * Löscht eine virtuelle Maschine mit allen zugehörigen Dateien
+     * Deletes a virtual machine along with all associated files
      * 
-     * Die Flags für libvirt_domain_undefine_flags setzen sich zusammen aus:
+     * The flags for libvirt_domain_undefine_flags consist of:
      * 
      * NVRAM (8):
-     * - Löscht UEFI/NVRAM Dateien
-     * - Wichtig für Windows VMs und UEFI-Boot
+     * - Deletes UEFI/NVRAM files
+     * - Important for Windows VMs and UEFI boot
      * 
      * MANAGED_SAVE (2):
-     * - Löscht gespeicherte VM-Zustände
-     * - Vergleichbar mit Hibernate-Dateien
+     * - Deletes saved VM states
+     * - Comparable to hibernate files
      * 
      * SNAPSHOTS_METADATA (1):
-     * - Löscht Snapshot-Informationen
-     * - Verhindert verwaiste Snapshot-Daten
+     * - Deletes snapshot information
+     * - Prevents orphaned snapshot data
      * 
-     * @param string $name Name der virtuellen Maschine
-     * @param Request $request HTTP-Request mit deleteVhd Option
-     * @return JsonResponse Status der Löschoperation
+     * @param string $name Name of the virtual machine
+     * @param Request $request HTTP request with deleteVhd option
+     * @return JsonResponse Status of the delete operation
      */
     public function deleteDomain(string $name, Request $request): JsonResponse
     {
@@ -466,7 +493,7 @@ class VirtualizationController extends AbstractController
                 ], 404);
             }
 
-            // JSON-Daten validieren
+            // Validate JSON data
             $data = json_decode($request->getContent(), true);
             if (!is_array($data)) {
                 return $this->json([
@@ -478,7 +505,7 @@ class VirtualizationController extends AbstractController
 
 
             if ($deleteVhd) {
-                // Alle Storage Pools durchsuchen
+                // Search all storage pools
                 $pools = libvirt_list_storagepools($this->connection);
                 if (empty($pools)) {
                     error_log($this->translator->trans('error.no_storage_pools'));
@@ -493,18 +520,18 @@ class VirtualizationController extends AbstractController
                         if (is_resource($pool)) {
                             libvirt_storagepool_refresh($pool);
                         } else {
-                            error_log("Konnte Pool nicht öffnen: " . libvirt_get_last_error());
+                            error_log("Could not open pool: " . libvirt_get_last_error());
                         }
                     }
                 }
 
-                // XML für Disk-Pfade mit korrektem Parameter-Typ
+                // XML for disk paths with correct parameter type
                 $xml = libvirt_domain_get_xml_desc($domain, null);
                 if ($xml) {
                     $pattern = '/<disk[^>]+device=[\'"]disk[\'"][^>]*>.*?<source\s+file=[\'"]([^\'""]+)[\'"].*?>/s';
                     preg_match_all($pattern, $xml, $matches);
 
-                    // Direkte Zuweisung der gefundenen Pfade
+                    // Direct assignment of found paths
                     $diskPaths = [];
                     if (!empty($matches[1])) {
                         $diskPaths = $matches[1];
@@ -515,23 +542,23 @@ class VirtualizationController extends AbstractController
                             $volume = libvirt_storagevolume_lookup_by_path($this->connection, $path);
                             if (is_resource($volume)) {
                                 if (!libvirt_storagevolume_delete($volume, 0)) {
-                                    error_log("Fehler beim Löschen des Volumes: " . libvirt_get_last_error());
+                                    error_log("Error deleting volume: " . libvirt_get_last_error());
                                 }
                             }
                         } catch (\Exception $e) {
-                            error_log("Exception beim Volume-Löschen: " . $e->getMessage());
+                            error_log("Exception deleting volume: " . $e->getMessage());
                         }
                     }
                 }
             }
 
-            // Zuerst Domain stoppen falls noch aktiv
+            // First stop domain if still active
             $info = libvirt_domain_get_info($domain);
             if ($info['state'] === 1) {
                 libvirt_domain_destroy($domain);
             }
 
-            // Domain undefine mit allen Flags (NVRAM + MANAGED_SAVE + SNAPSHOTS_METADATA)
+            // Undefine domain with all flags (NVRAM + MANAGED_SAVE + SNAPSHOTS_METADATA)
             $result = libvirt_domain_undefine_flags($domain, 11); // 8 + 2 + 1
 
             return $this->json(new VirtualMachineAction(
@@ -549,32 +576,32 @@ class VirtualizationController extends AbstractController
 
 
     /**
-     * Erstellt eine neue virtuelle Maschine
+     * Creates a new virtual machine
      * 
-     * Diese Methode erstellt eine neue VM mit folgenden Schritten:
-     * 1. Erstellen einer QCOW2 Image-Datei als virtuelle Festplatte
-     * 2. Verwenden von virt-install zur Erstellung und Registrierung der VM
-     * 3. Automatischer Start der VM
+     * This method creates a new VM with the following steps:
+     * 1. Create a QCOW2 image file as a virtual hard disk
+     * 2. Use virt-install to create and register the VM
+     * 3. Automatically start the VM
      *
-     * Erwartetes Request-Format:
+     * Expected request format:
      * {
-     *   "name": "vm-name",           // Eindeutiger Name der VM
+     *   "name": "vm-name",           // Unique name of the VM
      *   "memory": 2048,              // RAM in MB
-     *   "vcpus": 2,                  // Anzahl virtueller CPUs
-     *   "disk_size": 20,             // Festplattengröße in GB
-     *   "iso_image": "/path/to.iso", // Pfad zum Boot-Image
-     *   "network_bridge": "br0"      // Netzwerk-Bridge / NAT-Netzwerk
+     *   "vcpus": 2,                  // Number of virtual CPUs
+     *   "disk_size": 20,             // Disk size in GB
+     *   "iso_image": "/path/to.iso", // Path to boot image
+     *   "network_bridge": "br0"      // Network bridge / NAT network
      * }
      * 
-     * Die erstellte VM enthält:
-     * - QCOW2 Festplatte
-     * - CD-ROM mit Boot-ISO
-     * - Netzwerk-Interface
-     * - SPICE Konsole für Remote-Zugriff
+     * The created VM includes:
+     * - QCOW2 hard disk
+     * - CD-ROM with boot ISO
+     * - Network interface
+     * - SPICE console for remote access
      * 
-     * @param Request $request HTTP-Request mit VM-Konfiguration
-     * @return JsonResponse Status der Erstellungsoperation
-     * @throws \Exception Bei Fehlern während der Erstellung
+     * @param Request $request HTTP request with VM configuration
+     * @return JsonResponse Status of the creation operation
+     * @throws \Exception In case of errors during creation
      */
     public function createDomain(Request $request): JsonResponse
     {
@@ -589,7 +616,7 @@ class VirtualizationController extends AbstractController
                 throw new \Exception($this->translator->trans('error.invalid_json'));
             }
 
-            // Validiere erforderliche Felder
+            // Validate required fields
             if (!isset($data['name']) || !is_string($data['name'])) {
                 throw new \Exception($this->translator->trans('error.invalid_vm_name'));
             }
@@ -599,14 +626,14 @@ class VirtualizationController extends AbstractController
             }
 
 
-            // Default Storage Pool holen
+            // Get default storage pool
             $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
             if (!is_resource($pool)) {
                 throw new \Exception($this->translator->trans('error.storage_pool_not_found'));
             }
 
 
-            // Pool XML parsen für den Basis-Pfad
+            // Parse pool XML for base path
             $poolXml = libvirt_storagepool_get_xml_desc($pool, null);
             if (!$poolXml) {
                 throw new \Exception($this->translator->trans('error.storage_pool_xml_failed'));
@@ -622,10 +649,10 @@ class VirtualizationController extends AbstractController
                 throw new \Exception($this->translator->trans('error.storage_pool_path_missing'));
             }
 
-            // VHD-Pfad im Pool
+            // VHD path in pool
             $vhdPath = $poolPath . '/' . $data['name'] . '.qcow2';
 
-            // QCOW2 Image erstellen
+            // Create QCOW2 image
             $command = sprintf(
                 'qemu-img create -f qcow2 %s %dG',
                 escapeshellarg($vhdPath),
@@ -642,10 +669,10 @@ class VirtualizationController extends AbstractController
                 throw new \Exception($errorMessage);
             }
 
-            // Prüfe ob OS-Variant angegeben wurde, ansonsten setze Standard
+            // Check if OS variant is specified, otherwise set default
             $osVariant = $data['os_variant'] ?? 'generic';
 
-            // Wähle die richtige Netzwerkkonfiguration
+            // Choose the correct network configuration
             $networkOption = '';
             if ($data['network_bridge'] === 'default') {
                 $networkOption = 'network=default';
@@ -669,20 +696,20 @@ class VirtualizationController extends AbstractController
             exec($virtInstallCmd, $virtOutput, $virtReturnVar);
 
             if ($virtReturnVar !== 0) {
-                // Bei Fehler die erstellte Disk löschen
+                // On error, delete the created disk
                 if (file_exists($vhdPath)) {
                     unlink($vhdPath);
                 }
                 throw new \Exception($this->translator->trans('error.create_vm_failed') . ': ' . implode("\n", $virtOutput));
             }
 
-            // Warte kurz, damit die VM ordnungsgemäß registriert wird
+            // Wait briefly to allow the VM to be properly registered
             sleep(2);
 
-            // Domain nach der Erstellung abrufen
+            // Retrieve domain after creation
             $domain = libvirt_domain_lookup_by_name($this->connection, $data['name']);
 
-            // Status der Erstellung zurückgeben
+            // Return status of the creation
             return $this->json(new VirtualMachineAction(
                 success: is_resource($domain),
                 domain: $data['name'],
@@ -690,7 +717,7 @@ class VirtualizationController extends AbstractController
                 error: !is_resource($domain) ? libvirt_get_last_error() : null
             ));
         } catch (\Exception $e) {
-            // Aufräumen bei Fehlern
+            // Clean up on errors
             if (isset($vhdPath) && file_exists($vhdPath)) {
                 unlink($vhdPath);
             }
@@ -701,17 +728,17 @@ class VirtualizationController extends AbstractController
     }
 
     /**
-     * Holt detaillierte Informationen einer VM
+     * Retrieves detailed information of a VM
      * 
-     * Liefert alle verfügbaren Informationen inkl:
-     * - Grundkonfiguration (CPU, RAM, Disk)
-     * - Aktuelle Auslastung
-     * - Netzwerkkonfiguration
-     * - SPICE/VNC Zugriffsdaten
-     * - Storage Informationen
+     * Provides all available information including:
+     * - Basic configuration (CPU, RAM, disk)
+     * - Current usage
+     * - Network configuration
+     * - SPICE/VNC access data
+     * - Storage information
      * 
-     * @param string $name Name der virtuellen Maschine
-     * @return JsonResponse Detaillierte VM Informationen
+     * @param string $name Name of the virtual machine
+     * @return JsonResponse Detailed VM information
      */
     public function getDomainDetails(string $name): JsonResponse
     {
@@ -729,7 +756,7 @@ class VirtualizationController extends AbstractController
             }
 
 
-            // Basis-Informationen
+            // Basic information
             $info = libvirt_domain_get_info($domain);
             $xml = libvirt_domain_get_xml_desc($domain, null);
             $xmlObj = simplexml_load_string($xml);
@@ -738,37 +765,37 @@ class VirtualizationController extends AbstractController
                 throw new \Exception($this->translator->trans('error.invalid_domain_xml'));
             }
 
-            // Detaillierte Speicherstatistiken abrufen
+            // Retrieve detailed memory statistics
             $memoryStats = libvirt_domain_memory_stats($domain);
 
-            // Speicherstatistiken gemäß der virDomainMemoryStatTags:
-            // '7' (RSS): Resident Set Size - tatsächlich belegter physischer Speicher
-            // '8' (USABLE): Verfügbarer Speicher ohne zu swappen (entspricht "verfügbar" in free)
-            // '4' (UNUSED): Vollständig freier Speicher (entspricht "frei" in free)
-            // '10' (DISK_CACHES): Disk-Caches, die schnell freigegeben werden können
+            // Memory statistics according to virDomainMemoryStatTags:
+            // '7' (RSS): Resident Set Size - actually used physical memory
+            // '8' (USABLE): Usable memory without swapping (equivalent to "available" in free)
+            // '4' (UNUSED): Completely free memory (equivalent to "free" in free)
+            // '10' (DISK_CACHES): Disk caches that can be quickly freed
             // https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainMemoryStatStruct
 
-            // Tatsächlich benutzter Speicher (RSS)
+            // Actually used memory (RSS)
             $actualMemoryUsage = isset($memoryStats['7']) ? (int)$memoryStats['7'] : $info['memory'];
 
-            // Verfügbarer Speicher (USABLE) - entspricht dem "verfügbar"-Wert in free
+            // Usable memory (USABLE) - equivalent to the "available" value in free
             $availableMemory = isset($memoryStats['8']) ? (int)$memoryStats['8'] : 0;
 
-            // Fallbacks, wenn die Werte nicht verfügbar sind
+            // Fallbacks if values are not available
             if ($availableMemory <= 0) {
-                // Alternative Berechnung, wenn USABLE nicht verfügbar ist
+                // Alternative calculation if USABLE is not available
                 $freeMemory = isset($memoryStats['4']) ? (int)$memoryStats['4'] : 0;
                 $diskCaches = isset($memoryStats['10']) ? (int)$memoryStats['10'] : 0;
                 $availableMemory = $freeMemory + $diskCaches;
 
-                // Wenn immer noch 0, dann Differenz aus maxMem und RSS verwenden
+                // If still 0, use the difference between maxMem and RSS
                 if ($availableMemory <= 0) {
                     $availableMemory = $info['maxMem'] - $actualMemoryUsage;
                     if ($availableMemory < 0) $availableMemory = 0;
                 }
             }
 
-            // Storage Informationen extrahieren
+            // Extract storage information
             $disks = [];
             foreach ($xmlObj->devices->disk as $disk) {
                 if ((string)$disk['device'] === 'disk') {
@@ -781,7 +808,7 @@ class VirtualizationController extends AbstractController
                 }
             }
 
-            // Netzwerk Informationen
+            // Network information
             $networks = [];
             foreach ($xmlObj->devices->interface as $interface) {
                 $networks[] = [
@@ -792,7 +819,7 @@ class VirtualizationController extends AbstractController
                 ];
             }
 
-            // SPICE/VNC Informationen
+            // SPICE/VNC information
             $graphics = [];
             foreach ($xmlObj->devices->graphics as $graphic) {
                 $graphics[] = [
@@ -803,21 +830,21 @@ class VirtualizationController extends AbstractController
                 ];
             }
 
-            // Performance Metriken mit korrekten Speicherinformationen
+            // Performance metrics with correct memory information
             $stats = [
                 'cpu_time' => $info['cpuUsed'] ?? 0,
                 'memory_usage' => $actualMemoryUsage,
                 'available_memory' => $availableMemory,
                 'max_memory' => $info['maxMem'] ?? 0,
-                'memory_details' => $memoryStats // Detaillierte Speicherstatistiken für Debugging
+                'memory_details' => $memoryStats // Detailed memory statistics for debugging
             ];
 
             return $this->json([
                 'name' => $name,
                 'state' => $info['state'] ?? 0,
                 'maxMemory' => $info['maxMem'] ?? 0,
-                'memory' => $actualMemoryUsage, // Tatsächlich genutzter Speicher (RSS)
-                'availableMemory' => $availableMemory, // Verfügbarer Speicher (wert aus key '4')
+                'memory' => $actualMemoryUsage, // Actually used memory (RSS)
+                'availableMemory' => $availableMemory, // Usable memory (value from key '4')
                 'cpuCount' => $info['nrVirtCpu'] ?? 0,
                 'cpuTime' => $info['cpuUsed'] ?? 0,
                 'disks' => $disks,
@@ -832,10 +859,10 @@ class VirtualizationController extends AbstractController
 
 
     /**
-     * Erstellt oder findet eine WebSocket-Verbindung für SPICE
+     * Creates or finds a WebSocket connection for SPICE
      * 
-     * @param string $name Name der virtuellen Maschine
-     * @return JsonResponse WebSocket-Verbindungsdaten
+     * @param string $name Name of the virtual machine
+     * @return JsonResponse WebSocket connection data
      */
     public function getSpiceConnection(string $name): JsonResponse
     {
@@ -844,7 +871,7 @@ class VirtualizationController extends AbstractController
             if (!is_resource($this->connection)) {
                 throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
             }
-    
+
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             if (!is_resource($domain)) {
                 return $this->json([
@@ -852,29 +879,29 @@ class VirtualizationController extends AbstractController
                 ], 404);
             }
 
-            // XML parsen für SPICE-Port mit xmllint (genauer als SimpleXML)
+            // Parse XML for SPICE port with xmllint (more accurate than SimpleXML)
             $xml = libvirt_domain_get_xml_desc($domain, NULL);
             $tmpFile = tempnam(sys_get_temp_dir(), 'vm_');
             file_put_contents($tmpFile, $xml);
 
             $spicePort = (int)shell_exec("xmllint --xpath 'string(//graphics[@type=\"spice\"]/@port)' " . escapeshellarg($tmpFile));
             unlink($tmpFile);
-            
+
             if ($spicePort <= 0) {
                 return $this->json([
                     'error' => $this->translator->trans('error.no_spice_port')
                 ], 404);
             }
 
-            // WebSocket Port = SPICE Port + 1000 (wie im Shell-Script)
+            // WebSocket Port = SPICE Port + 1000 (as in the shell script)
             $wsPort = $spicePort + 1000;
 
-            // Prüfen ob WebSocket bereits läuft
+            // Check if WebSocket is already running
             $checkCmd = "ps aux | grep -v grep | grep 'websockify $wsPort'";
             exec($checkCmd, $output, $returnVar);
 
             if ($returnVar !== 0) {
-                // WebSocket noch nicht aktiv, starten
+                // WebSocket not yet active, start it
                 $cmd = sprintf(
                     'nohup websockify %d 0.0.0.0:%d  > /dev/null 2>&1 & echo $!',
                     $wsPort,
@@ -882,7 +909,7 @@ class VirtualizationController extends AbstractController
                 );
                 exec($cmd, $output);
 
-                // Kurz warten und prüfen ob der Prozess läuft
+                // Wait briefly and check if the process is running
                 sleep(1);
                 exec($checkCmd, $output, $returnVar);
                 if ($returnVar !== 0) {
@@ -900,6 +927,286 @@ class VirtualizationController extends AbstractController
         } catch (\Exception $e) {
             error_log("SPICE Connection Error: " . $e->getMessage());
             return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+
+
+    /**
+     * Lists all snapshots of a virtual machine
+     * 
+     * This method retrieves all snapshots for the specified VM and returns
+     * detailed information about each snapshot:
+     * - Name of the snapshot
+     * - Creation timestamp
+     * - VM state at snapshot time
+     * - Description (if available)
+     * - Parent snapshot (for hierarchical snapshots)
+     *
+     * The response format is structured as:
+     * {
+     *   "vm": "vm-name",
+     *   "snapshots": [
+     *     {
+     *       "name": "snapshot1",
+     *       "creationTime": "1234567890",
+     *       "state": "running",
+     *       "description": "Snapshot description",
+     *       "parent": "parent-snapshot-name"
+     *     }
+     *   ]
+     * }
+     * 
+     * @param string $name Name of the virtual machine
+     * @return JsonResponse List of all snapshots with their details
+     * @throws \Exception In case of connection problems or if the domain is not found
+     */
+    public function listDomainSnapshots(string $name): JsonResponse
+    {
+        try {
+            $this->connect();
+
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            // Retrieve snapshots of the domain
+            $snapshots = libvirt_list_domain_snapshots($domain);  // <-- Use this function instead
+            if (empty($snapshots)) {
+                return $this->json([
+                    'vm' => $name,
+                    'snapshots' => []
+                ]);
+            }
+
+            $snapshotList = [];
+            foreach ($snapshots as $snapshotName) {
+                $snapshot = libvirt_domain_snapshot_lookup_by_name($domain, $snapshotName, 0);
+                if (!is_resource($snapshot)) {
+                    continue;
+                }
+
+                $xml = libvirt_domain_snapshot_get_xml($snapshot, 0);
+                $xmlObj = simplexml_load_string($xml);
+                if ($xmlObj === false) {
+                    error_log("Failed to parse snapshot XML for: " . $snapshotName);
+                    continue;
+                }
+
+                $snapshotList[] = [
+                    'name' => $snapshotName,
+                    'creationTime' => (string)$xmlObj->creationTime,
+                    'state' => (string)$xmlObj->state,
+                    'description' => (string)$xmlObj->description,
+                    'parent' => isset($xmlObj->parent) ? (string)$xmlObj->parent->name : null
+                ];
+            }
+
+            return $this->json([
+                'vm' => $name,
+                'snapshots' => $snapshotList
+            ]);
+        } catch (\Exception $e) {
+            error_log("Snapshot list error: " . $e->getMessage());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+
+    /**
+     * Creates a new snapshot of a virtual machine
+     *
+     * Expected request format:
+     * {
+     *   "name": "snapshot-name",         // Name for the new snapshot
+     *   "description": "My snapshot"     // Optional description
+     * }
+     * 
+     * @param string $name Name of the virtual machine
+     * @param Request $request HTTP request with snapshot configuration
+     * @return JsonResponse Status of the snapshot creation
+     */
+    public function createDomainSnapshot(string $name, Request $request): JsonResponse
+    {
+        try {
+            error_log("=== Starting snapshot creation for VM: $name ===");
+            $this->connect();
+
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            error_log("Domain lookup result: " . ($domain ? "success" : "failed"));
+
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+
+            // Parse request data
+            $content = $request->getContent();
+            error_log("Request content: " . $content);
+
+            $data = json_decode($content, true);
+            error_log("Parsed data: " . print_r($data, true));
+
+            if (!is_array($data) || empty($data['name'])) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.invalid_snapshot_name')
+                ], 400);
+            }
+
+
+            // Create snapshot
+            $result = libvirt_domain_snapshot_create($domain, 0);
+            error_log("Snapshot creation result: " . ($result ? "success" : "failed"));
+            if (!$result) {
+                error_log("Libvirt error: " . libvirt_get_last_error());
+            }
+
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'create_snapshot',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+        } catch (\Exception $e) {
+            error_log("CRITICAL Snapshot creation error: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Deletes a snapshot of a virtual machine
+     *
+     * @param string $name Name of the virtual machine
+     * @param string $snapshot Name of the snapshot to be deleted
+     * @return JsonResponse Status of the delete operation
+     */
+    public function deleteDomainSnapshot(string $name, string $snapshot): JsonResponse
+    {
+        try {
+            $this->connect();
+            
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+    
+            // Get all snapshots to check dependencies
+            $allSnapshots = $this->listDomainSnapshots($name)->getContent();
+            $allSnapshots = json_decode($allSnapshots, true);
+            $childSnapshots = [];
+            
+            // Find child snapshots
+            foreach ($allSnapshots['snapshots'] as $snap) {
+                if ($snap['parent'] === $snapshot) {
+                    $childSnapshots[] = $snap['name'];
+                }
+            }
+    
+            // If children exist, delete them first
+            if (!empty($childSnapshots)) {
+                foreach ($childSnapshots as $childSnapshot) {
+                    $childRes = libvirt_domain_snapshot_lookup_by_name($domain, $childSnapshot, 0);
+                    if (is_resource($childRes)) {
+                        libvirt_domain_snapshot_delete($childRes);
+                    }
+                }
+            }
+    
+            // Now delete the parent snapshot
+            $snapshotRes = libvirt_domain_snapshot_lookup_by_name($domain, $snapshot, 0);
+            if (!is_resource($snapshotRes)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.snapshot_not_found')
+                ], 404);
+            }
+    
+            $result = libvirt_domain_snapshot_delete($snapshotRes);
+    
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'delete_snapshot',
+                error: $result === false ? libvirt_get_last_error() : null,
+                details: !empty($childSnapshots) ? [
+                    'deletedChildren' => $childSnapshots
+                ] : null
+            ));
+    
+        } catch (\Exception $e) {
+            error_log("Snapshot deletion error: " . $e->getMessage());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reverts a virtual machine to a specific snapshot
+     *
+     * This method restores the VM to the state of the specified snapshot.
+     * Important notes:
+     * - The VM state (running/stopped) will be restored as it was in the snapshot
+     * - All changes since the snapshot will be lost
+     * - Child snapshots remain intact but might become invalid
+     *
+     * @param string $name Name of the virtual machine
+     * @param string $snapshot Name of the snapshot to revert to
+     * @return JsonResponse Status of the revert operation
+     */
+    public function revertDomainSnapshot(string $name, string $snapshot): JsonResponse
+    {
+        try {
+            $this->connect();
+            error_log("=== Starting snapshot revert for VM: $name to snapshot: $snapshot ===");
+    
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+    
+            // Check if snapshot exists
+            $snapshotRes = libvirt_domain_snapshot_lookup_by_name($domain, $snapshot, 0);
+            if (!is_resource($snapshotRes)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.snapshot_not_found')
+                ], 404);
+            }
+    
+            // Execute revert
+            $result = libvirt_domain_snapshot_revert($snapshotRes, 0); 
+            error_log("Revert result: " . ($result ? "success" : "failed"));
+    
+            if (!$result) {
+                error_log("Libvirt error: " . libvirt_get_last_error());
+            }
+    
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'revert_snapshot',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+    
+        } catch (\Exception $e) {
+            error_log("CRITICAL Snapshot revert error: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 }
