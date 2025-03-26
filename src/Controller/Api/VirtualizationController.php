@@ -83,6 +83,14 @@ use App\Dto\VirtualMachineAction;
             read: false,
             output: VirtualMachineAction::class,
         ),
+        new Post(
+            name: 'create_snapshot',
+            uriTemplate: '/virt/domain/{name}/snapshot/create',
+            controller: self::class . '::createDomainSnapshot',
+            read: false,
+            output: VirtualMachineAction::class,
+            input: null 
+        ),
 
     ]
 )]
@@ -943,14 +951,14 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
-            
+
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-    
+
             // Retrieve snapshots of the domain
             $snapshots = libvirt_list_domain_snapshots($domain);  // <-- Use this function instead
             if (empty($snapshots)) {
@@ -959,14 +967,14 @@ class VirtualizationController extends AbstractController
                     'snapshots' => []
                 ]);
             }
-    
+
             $snapshotList = [];
             foreach ($snapshots as $snapshotName) {
                 $snapshot = libvirt_domain_snapshot_lookup_by_name($domain, $snapshotName, 0);
                 if (!is_resource($snapshot)) {
                     continue;
                 }
-    
+
                 $xml = libvirt_domain_snapshot_get_xml($snapshot, 0);
                 $xmlObj = simplexml_load_string($xml);
                 if ($xmlObj === false) {
@@ -982,14 +990,80 @@ class VirtualizationController extends AbstractController
                     'parent' => isset($xmlObj->parent) ? (string)$xmlObj->parent->name : null
                 ];
             }
-    
+
             return $this->json([
                 'vm' => $name,
                 'snapshots' => $snapshotList
             ]);
-            
         } catch (\Exception $e) {
             error_log("Snapshot list error: " . $e->getMessage());
+            return $this->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+
+    /**
+     * Creates a new snapshot of a virtual machine
+     *
+     * Expected request format:
+     * {
+     *   "name": "snapshot-name",         // Name for the new snapshot
+     *   "description": "My snapshot"     // Optional description
+     * }
+     * 
+     * @param string $name Name of the virtual machine
+     * @param Request $request HTTP request with snapshot configuration
+     * @return JsonResponse Status of the snapshot creation
+     */
+    public function createDomainSnapshot(string $name, Request $request): JsonResponse
+    {
+        try {
+            error_log("=== Starting snapshot creation for VM: $name ===");
+            $this->connect();
+    
+            $domain = libvirt_domain_lookup_by_name($this->connection, $name);
+            error_log("Domain lookup result: " . ($domain ? "success" : "failed"));
+            
+            if (!is_resource($domain)) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.libvirt_domain_not_found')
+                ], 404);
+            }
+    
+            // Parse request data
+            $content = $request->getContent();
+            error_log("Request content: " . $content);
+            
+            $data = json_decode($content, true);
+            error_log("Parsed data: " . print_r($data, true));
+    
+            if (!is_array($data) || empty($data['name'])) {
+                return $this->json([
+                    'error' => $this->translator->trans('error.invalid_snapshot_name')
+                ], 400);
+            }
+    
+    
+            // Create snapshot
+            $result = libvirt_domain_snapshot_create($domain, 0);
+            error_log("Snapshot creation result: " . ($result ? "success" : "failed"));
+            if (!$result) {
+                error_log("Libvirt error: " . libvirt_get_last_error());
+            }
+    
+            return $this->json(new VirtualMachineAction(
+                success: $result !== false,
+                domain: $name,
+                action: 'create_snapshot',
+                error: $result === false ? libvirt_get_last_error() : null
+            ));
+    
+        } catch (\Exception $e) {
+            error_log("CRITICAL Snapshot creation error: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
             return $this->json([
                 'error' => $e->getMessage()
             ], 500);
