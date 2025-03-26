@@ -1102,19 +1102,19 @@ class VirtualizationController extends AbstractController
                 ], 404);
             }
     
-            // Alle Snapshots holen um Abhängigkeiten zu prüfen
+            // Get all snapshots to check dependencies
             $allSnapshots = $this->listDomainSnapshots($name)->getContent();
             $allSnapshots = json_decode($allSnapshots, true);
             $childSnapshots = [];
             
-            // Child Snapshots finden
+            // Find child snapshots
             foreach ($allSnapshots['snapshots'] as $snap) {
                 if ($snap['parent'] === $snapshot) {
                     $childSnapshots[] = $snap['name'];
                 }
             }
     
-            // Wenn Children existieren, diese zuerst löschen
+            // If children exist, delete them first
             if (!empty($childSnapshots)) {
                 foreach ($childSnapshots as $childSnapshot) {
                     $childRes = libvirt_domain_snapshot_lookup_by_name($domain, $childSnapshot, 0);
@@ -1124,7 +1124,7 @@ class VirtualizationController extends AbstractController
                 }
             }
     
-            // Jetzt den Parent-Snapshot löschen
+            // Now delete the parent snapshot
             $snapshotRes = libvirt_domain_snapshot_lookup_by_name($domain, $snapshot, 0);
             if (!is_resource($snapshotRes)) {
                 return $this->json([
@@ -1178,7 +1178,7 @@ class VirtualizationController extends AbstractController
                 ], 404);
             }
     
-            // Prüfen ob Snapshot existiert
+            // Check if snapshot exists
             $snapshotRes = libvirt_domain_snapshot_lookup_by_name($domain, $snapshot, 0);
             if (!is_resource($snapshotRes)) {
                 return $this->json([
@@ -1186,7 +1186,7 @@ class VirtualizationController extends AbstractController
                 ], 404);
             }
     
-            // Revert ausführen
+            // Execute revert
             $result = libvirt_domain_snapshot_revert($snapshotRes, 0); 
             error_log("Revert result: " . ($result ? "success" : "failed"));
     
