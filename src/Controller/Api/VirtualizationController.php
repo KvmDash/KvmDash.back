@@ -1094,31 +1094,56 @@ class VirtualizationController extends AbstractController
     {
         try {
             $this->connect();
-
+            
             $domain = libvirt_domain_lookup_by_name($this->connection, $name);
             if (!is_resource($domain)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.libvirt_domain_not_found')
                 ], 404);
             }
-
-            // Snapshot-Resource holen
+    
+            // Alle Snapshots holen um Abhängigkeiten zu prüfen
+            $allSnapshots = $this->listDomainSnapshots($name)->getContent();
+            $allSnapshots = json_decode($allSnapshots, true);
+            $childSnapshots = [];
+            
+            // Child Snapshots finden
+            foreach ($allSnapshots['snapshots'] as $snap) {
+                if ($snap['parent'] === $snapshot) {
+                    $childSnapshots[] = $snap['name'];
+                }
+            }
+    
+            // Wenn Children existieren, diese zuerst löschen
+            if (!empty($childSnapshots)) {
+                foreach ($childSnapshots as $childSnapshot) {
+                    $childRes = libvirt_domain_snapshot_lookup_by_name($domain, $childSnapshot, 0);
+                    if (is_resource($childRes)) {
+                        libvirt_domain_snapshot_delete($childRes);
+                    }
+                }
+            }
+    
+            // Jetzt den Parent-Snapshot löschen
             $snapshotRes = libvirt_domain_snapshot_lookup_by_name($domain, $snapshot, 0);
             if (!is_resource($snapshotRes)) {
                 return $this->json([
                     'error' => $this->translator->trans('error.snapshot_not_found')
                 ], 404);
             }
-
-            // Snapshot löschen
+    
             $result = libvirt_domain_snapshot_delete($snapshotRes);
-
+    
             return $this->json(new VirtualMachineAction(
                 success: $result !== false,
                 domain: $name,
                 action: 'delete_snapshot',
-                error: $result === false ? libvirt_get_last_error() : null
+                error: $result === false ? libvirt_get_last_error() : null,
+                details: !empty($childSnapshots) ? [
+                    'deletedChildren' => $childSnapshots
+                ] : null
             ));
+    
         } catch (\Exception $e) {
             error_log("Snapshot deletion error: " . $e->getMessage());
             return $this->json([
