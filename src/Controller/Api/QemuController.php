@@ -47,6 +47,12 @@ use Symfony\Contracts\Translation\TranslatorInterface;
             uriTemplate: '/qemu/iso/delete',
             controller: self::class . '::deleteIso'
         ),
+        new Post(
+            name: 'upload_iso_file',
+            uriTemplate: '/qemu/iso/upload/file',
+            controller: self::class . '::uploadIsoFile',
+            deserialize: false
+        ),
     ]
 )]
 
@@ -739,6 +745,90 @@ class QemuController extends AbstractController
             return $this->json([
                 'status' => 'success',
                 'message' => $this->translator->trans('success.iso_deleted')
+            ]);
+        } catch (\Exception $e) {
+            return $this->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    // ...existing code...
+
+    /**
+     * Handles direct ISO file uploads from client to server
+     * 
+     * This endpoint allows uploading ISO files directly:
+     * - Validates file type and size
+     * - Stores in libvirt storage pool
+     * - Returns progress and status
+     *
+     * Request must be multipart/form-data with:
+     * - 'file': The ISO file
+     *
+     * @param Request $request The request containing the file
+     * @return JsonResponse Upload status
+     */
+    public function uploadIsoFile(Request $request): JsonResponse
+    {
+        try {
+            $file = $request->files->get('file');
+            if (!$file) {
+                throw new \Exception($this->translator->trans('error.no_file_uploaded'));
+            }
+
+            // Validate file type
+            if (
+                $file->getClientMimeType() !== 'application/x-iso9660-image'
+                && !str_ends_with(strtolower($file->getClientOriginalName()), '.iso')
+            ) {
+                throw new \Exception($this->translator->trans('error.invalid_file_type'));
+            }
+
+            // Connect to libvirt
+            $this->connect();
+            if (!is_resource($this->connection)) {
+                throw new \Exception($this->translator->trans('error.libvirt_connection_failed'));
+            }
+
+            // Get storage pool
+            $pool = libvirt_storagepool_lookup_by_name($this->connection, 'default');
+            if (!is_resource($pool)) {
+                throw new \Exception($this->translator->trans('error.storage_pool_not_found'));
+            }
+
+            // Get pool path from XML
+            $poolXml = simplexml_load_string(libvirt_storagepool_get_xml_desc($pool, null));
+            if ($poolXml === false) {
+                throw new \Exception($this->translator->trans('error.storage_pool_xml_invalid'));
+            }
+
+            $targetDir = (string)$poolXml->target->path;
+            $filename = $file->getClientOriginalName();
+            $targetPath = rtrim($targetDir, '/') . '/' . $filename;
+
+            // Check if file already exists
+            if (file_exists($targetPath)) {
+                throw new \Exception($this->translator->trans('error.iso_file_exists'));
+            }
+
+            // Move uploaded file to storage pool
+            if (!$file->move($targetDir, $filename)) {
+                throw new \Exception($this->translator->trans('error.file_move_failed'));
+            }
+
+            // Refresh pool to detect new file
+            libvirt_storagepool_refresh($pool);
+
+            return $this->json([
+                'status' => 'success',
+                'message' => $this->translator->trans('success.iso_uploaded'),
+                'data' => [
+                    'filename' => $filename,
+                    'size' => filesize($targetPath),
+                    'path' => $targetPath
+                ]
             ]);
         } catch (\Exception $e) {
             return $this->json([
