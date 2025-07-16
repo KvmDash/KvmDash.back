@@ -21,14 +21,14 @@ use App\Dto\CommandExecution;
         new Get(
             name: 'api_system_status',
             uriTemplate: '/system/status',
-            controller: self::class.'::getSystemStatus',
+            controller: self::class . '::getSystemStatus',
             output: SystemStatus::class,
             read: false
         ),
         new Post(
             name: 'api_system_execute',
             uriTemplate: '/system/execute',
-            controller: self::class.'::executeCommand',
+            controller: self::class . '::executeCommand',
             output: CommandExecution::class,
             read: false
         )
@@ -49,15 +49,15 @@ class SystemController extends AbstractController
         // CPU-Auslastung
         $cpuProcess = new Process(['top', '-bn1']);
         $cpuProcess->run();
-        
+
         // RAM-Nutzung
         $memProcess = new Process(['free', '-m']);
         $memProcess->run();
-        
+
         // Disk-Nutzung
         $diskProcess = new Process(['df', '-h']);
         $diskProcess->run();
-        
+
         $status = new SystemStatus(
             cpuInfo: $cpuProcess->isSuccessful() ? $cpuProcess->getOutput() : 'Error',
             memoryInfo: $memProcess->isSuccessful() ? $memProcess->getOutput() : 'Error',
@@ -66,9 +66,8 @@ class SystemController extends AbstractController
         );
 
         return $this->json($status);
-        
     }
-    
+
 
 
     public function executeCommand(Request $request): JsonResponse
@@ -78,29 +77,33 @@ class SystemController extends AbstractController
         if (!is_array($data)) {
             return $this->json(['error' => $this->translator->trans('error.invalid_json')], 400);
         }
-    
+
         if (!isset($data['command']) || !is_string($data['command'])) {
             return $this->json(['error' => $this->translator->trans('error.no_command_specified')], 400);
         }
-    
-        $command = $data['command'];
-    
+
+        $command = trim($data['command']);
+
         // Whitelist-Prüfung für erlaubte Befehle
-        $allowedCommands = ['uptime', 'hostname', 'date'];
-        $commandParts = explode(' ', $command);
-        
-        if (!in_array($commandParts[0], $allowedCommands)) {
+        $allowedCommands = [
+            'uptime'   => ['uptime'],
+            'hostname' => ['hostname'],
+            'date'     => ['date'],
+        ];
+
+        if (!array_key_exists($command, $allowedCommands)) {
             return $this->json(['error' => $this->translator->trans('error.command_not_allowed')], 403);
         }
-        
-        $process = Process::fromShellCommandline($command);
+
+        $process = new Process($allowedCommands[$command]);
         $process->run();
-        
+
+
         $exitCode = $process->getExitCode();
         if ($exitCode === null) {
             $exitCode = -1; // Fallback wenn kein Exit-Code verfügbar
         }
-        
+
         return $this->json(new CommandExecution(
             command: $command,
             success: $process->isSuccessful(),
